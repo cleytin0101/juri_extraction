@@ -1,37 +1,38 @@
 """
-Scraper do PJe TRT-7 usando Playwright com interceptação de XHR.
+Scraper do PJe TRT-7 — 2 etapas:
 
-ATENÇÃO: Os seletores em selectors.py precisam ser validados contra a página
-real do PJe. Use o comando abaixo para capturar seletores interativamente:
+ETAPA 1: Lista de pautas (pública, sem CAPTCHA)
+  → Acessa /consultaprocessual/pautas
+  → Seleciona vara + data → extrai números de processo, horário, tipo
 
-    python -m playwright codegen https://pje.trt7.jus.br/consultaprocessual/pautas
-
-A estratégia preferida é interceptar respostas XHR (mais estável que DOM).
-O fallback é parsing de DOM.
+ETAPA 2: Detalhe de cada processo (requer CAPTCHA)
+  → Acessa /captcha/detalhe-processo/{numero}/1
+  → Resolve CAPTCHA automaticamente com ddddocr (gratuito, local)
+  → Extrai nomes completos: reclamante + empresa reclamada
 """
 
-import json
 import asyncio
 import logging
+import re
 from datetime import date
 from typing import List, Optional
 
-from playwright.async_api import async_playwright, Page, Response
+from playwright.async_api import async_playwright, Page
 
-from ..config import settings
-from .selectors import SELECTORS, API_PATTERNS
-from .parser import parse_processo_from_json
+from .selectors import SELECTORS, TABLE_COLUMNS
+from .captcha_solver import solve_captcha_bytes
+from .parser import parse_numero_processo, normalize_tipo_audiencia, parse_data_audiencia
 
 logger = logging.getLogger(__name__)
 
+BASE_URL = "https://pje.trt7.jus.br/consultaprocessual"
 
-async def scrape_pauta(vara_codigo: str, data_audiencia: date) -> List[dict]:
-    """
-    Acessa a página de pautas do PJe, filtra por vara e data,
-    e retorna lista de processos parseados.
-    """
-    api_responses: List[dict] = []
 
+async def scrape_pauta(vara_nome: str, data_audiencia: date) -> List[dict]:
+    """
+    Pipeline completo: etapa 1 (lista) + etapa 2 (detalhe com CAPTCHA).
+    Retorna lista de processos com dados completos.
+    """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -43,130 +44,266 @@ async def scrape_pauta(vara_codigo: str, data_audiencia: date) -> List[dict]:
             locale="pt-BR",
             timezone_id="America/Fortaleza",
         )
-        page = await context.new_page()
-
-        # Interceptar respostas de API
-        async def on_response(response: Response):
-            url = response.url
-            if any(pat in url for pat in API_PATTERNS):
-                try:
-                    ct = response.headers.get("content-type", "")
-                    if "json" in ct:
-                        body = await response.json()
-                        api_responses.append({"url": url, "body": body})
-                        logger.info(f"XHR capturado: {url}")
-                except Exception as e:
-                    logger.debug(f"Erro ao ler XHR {url}: {e}")
-
-        page.on("response", on_response)
 
         try:
-            await page.goto(
-                f"{settings.pje_base_url}/pautas",
-                wait_until="networkidle",
-                timeout=30000,
-            )
+            # ETAPA 1: extrair lista de audiências
+            page = await context.new_page()
+            audiencias = await _scrape_lista_pautas(page, vara_nome, data_audiencia)
+            logger.info(f"Etapa 1: {len(audiencias)} audiências encontradas em {vara_nome}")
 
-            # Selecionar vara
-            await _select_vara(page, vara_codigo)
+            # ETAPA 2: para cada processo, acessar detalhe e resolver CAPTCHA
+            processos = []
+            for aud in audiencias:
+                numero = aud.get("numero_processo", "")
+                if not numero:
+                    continue
+                try:
+                    detail_page = await context.new_page()
+                    detalhe = await _scrape_detalhe_processo(detail_page, numero)
+                    await detail_page.close()
 
-            # Preencher data
-            data_str = data_audiencia.strftime("%d/%m/%Y")
-            await _fill_date(page, data_str)
+                    if detalhe:
+                        processos.append({**aud, **detalhe})
+                    else:
+                        # Usar dados parciais da lista mesmo sem detalhe
+                        processos.append(aud)
 
-            # Clicar em pesquisar
-            await _click_search(page)
+                    # Pequena pausa entre requests para não sobrecarregar
+                    await asyncio.sleep(1.5)
 
-            # Aguardar carregamento dos resultados
-            await page.wait_for_load_state("networkidle", timeout=15000)
-            await asyncio.sleep(2)  # buffer extra para XHR finalizarem
+                except Exception as e:
+                    logger.error(f"Erro no detalhe de {numero}: {e}")
+                    processos.append(aud)
 
         except Exception as e:
-            logger.error(f"Erro durante scraping de {vara_codigo} / {data_audiencia}: {e}")
+            logger.error(f"Erro no scraping de {vara_nome}/{data_audiencia}: {e}")
+            processos = []
         finally:
             await browser.close()
-
-    # Tentar extrair dados dos XHR capturados
-    processos = _extract_from_xhr(api_responses)
-
-    if not processos:
-        logger.warning(
-            f"Nenhum dado XHR capturado para {vara_codigo}. "
-            "Verifique os seletores e padrões de URL em selectors.py."
-        )
 
     return processos
 
 
-async def _select_vara(page: Page, vara_codigo: str) -> None:
+async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date) -> List[dict]:
+    """
+    ETAPA 1: Acessa a lista pública de pautas e extrai os processos da tabela.
+    Não requer CAPTCHA.
+    """
+    await page.goto(f"{BASE_URL}/pautas", wait_until="networkidle", timeout=30000)
+
+    # Selecionar vara no dropdown
     try:
-        sel = SELECTORS["vara_dropdown"]
-        await page.wait_for_selector(sel, timeout=8000)
-        await page.select_option(sel, label=vara_codigo)
-    except Exception:
-        # Tentar abordagem alternativa: clicar no texto da vara
+        await page.wait_for_selector("select", timeout=8000)
+        await page.select_option("select", label=vara_nome)
+        logger.info(f"Vara selecionada: {vara_nome}")
+    except Exception as e:
+        logger.warning(f"Erro ao selecionar vara '{vara_nome}': {e}")
+        return []
+
+    # Preencher data
+    data_str = data_audiencia.strftime("%d/%m/%Y")
+    try:
+        # O PJe usa input de data com formato brasileiro
+        data_input = page.locator("input").nth(0)
+        await data_input.fill(data_str)
+        await page.keyboard.press("Tab")
+    except Exception as e:
+        logger.warning(f"Erro ao preencher data: {e}")
+
+    # Clicar em PESQUISAR
+    try:
+        await page.get_by_text("PESQUISAR").click()
+        await page.wait_for_load_state("networkidle", timeout=15000)
+        await asyncio.sleep(2)
+    except Exception as e:
+        logger.warning(f"Erro ao clicar em pesquisar: {e}")
+        return []
+
+    # Extrair dados da tabela
+    return await _parse_tabela_pautas(page, vara_nome, data_audiencia)
+
+
+async def _parse_tabela_pautas(page: Page, vara_nome: str, data_audiencia: date) -> List[dict]:
+    """Lê a tabela de audiências e extrai os dados de cada linha."""
+    audiencias = []
+
+    try:
+        rows = page.locator("table tbody tr")
+        count = await rows.count()
+        logger.info(f"Linhas na tabela: {count}")
+
+        for i in range(count):
+            row = rows.nth(i)
+            cells = row.locator("td")
+            cell_count = await cells.count()
+
+            if cell_count < 4:
+                continue
+
+            try:
+                horario = (await cells.nth(TABLE_COLUMNS["horario"]).inner_text()).strip()
+                tipo_raw = (await cells.nth(TABLE_COLUMNS["tipo"]).inner_text()).strip()
+                processo_cell = cells.nth(TABLE_COLUMNS["processo"])
+                processo_text = (await processo_cell.inner_text()).strip()
+
+                # Extrair número do processo (pode estar em link ou texto)
+                numero = parse_numero_processo(processo_text)
+                if not numero:
+                    # Tentar pegar do href do link
+                    link = processo_cell.locator("a").first
+                    href = await link.get_attribute("href") if await link.count() > 0 else ""
+                    numero = parse_numero_processo(href or "")
+
+                if not numero:
+                    logger.debug(f"Linha {i}: número de processo não encontrado em '{processo_text}'")
+                    continue
+
+                sala = (await cells.nth(TABLE_COLUMNS["sala"]).inner_text()).strip() if cell_count > TABLE_COLUMNS["sala"] else ""
+                situacao = (await cells.nth(TABLE_COLUMNS["situacao"]).inner_text()).strip() if cell_count > TABLE_COLUMNS["situacao"] else ""
+
+                # Montar data+hora da audiência
+                data_hora_str = f"{data_audiencia.strftime('%d/%m/%Y')} {horario}"
+                data_hora = parse_data_audiencia(data_hora_str)
+
+                audiencias.append({
+                    "numero_processo": numero,
+                    "orgao_julgador": vara_nome,
+                    "data_audiencia": data_hora or data_audiencia,
+                    "tipo_audiencia": normalize_tipo_audiencia(tipo_raw),
+                    "sala": sala,
+                    "situacao": situacao,
+                    "horario": horario,
+                    # Campos a preencher na etapa 2
+                    "reclamante_nome": "",
+                    "empresa_nome": "",
+                    "empresa_cnpj": None,
+                    "valor_causa": None,
+                    "resumo_caso": "",
+                    "raw_data": {
+                        "tipo_raw": tipo_raw,
+                        "processo_text": processo_text,
+                        "situacao": situacao,
+                    },
+                })
+
+            except Exception as e:
+                logger.debug(f"Erro ao processar linha {i}: {e}")
+
+    except Exception as e:
+        logger.error(f"Erro ao parsear tabela: {e}")
+
+    return audiencias
+
+
+async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
+    """
+    ETAPA 2: Acessa a página de detalhe do processo.
+    Resolve o CAPTCHA automaticamente com ddddocr e extrai partes.
+    """
+    # Montar URL de detalhe — formato confirmado pelas imagens
+    # Ex: /captcha/detalhe-processo/0000181-55.2026.5.07.0006/1
+    url = f"{BASE_URL}/captcha/detalhe-processo/{numero}/1"
+
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+    except Exception as e:
+        logger.warning(f"Erro ao acessar detalhe de {numero}: {e}")
+        return None
+
+    # Verificar se tem CAPTCHA
+    captcha_img = page.locator(SELECTORS["captcha_img"])
+    if await captcha_img.count() == 0:
+        # Sem CAPTCHA — página carregou direto
+        return await _extract_partes(page)
+
+    # Resolver CAPTCHA (até 3 tentativas)
+    for tentativa in range(1, 4):
         try:
-            await page.locator(f"text={vara_codigo}").first.click(timeout=5000)
+            img_bytes = await captcha_img.screenshot()
+            resposta = solve_captcha_bytes(img_bytes)
+
+            if not resposta:
+                logger.warning(f"CAPTCHA não resolvido (tentativa {tentativa})")
+                continue
+
+            # Preencher resposta
+            captcha_input = page.locator(SELECTORS["captcha_input"])
+            await captcha_input.fill(resposta)
+
+            # Enviar
+            await page.get_by_text("ENVIAR").click()
+            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            await asyncio.sleep(1)
+
+            # Verificar se CAPTCHA foi aceito (página mudou)
+            if await captcha_img.count() > 0:
+                logger.info(f"CAPTCHA incorreto (tentativa {tentativa}), tentando novamente...")
+                # Recarregar para novo CAPTCHA
+                await page.reload(wait_until="domcontentloaded")
+                await asyncio.sleep(1)
+                captcha_img = page.locator(SELECTORS["captcha_img"])
+                continue
+
+            # CAPTCHA aceito — extrair dados
+            logger.info(f"CAPTCHA resolvido com sucesso (tentativa {tentativa})")
+            return await _extract_partes(page)
+
         except Exception as e:
-            logger.warning(f"Não foi possível selecionar vara '{vara_codigo}': {e}")
+            logger.warning(f"Erro na tentativa {tentativa} do CAPTCHA de {numero}: {e}")
+
+    logger.warning(f"Não foi possível resolver CAPTCHA de {numero} após 3 tentativas")
+    return None
 
 
-async def _fill_date(page: Page, data_str: str) -> None:
-    try:
-        sel = SELECTORS["data_input"]
-        await page.wait_for_selector(sel, timeout=8000)
-        await page.fill(sel, data_str)
-        await page.keyboard.press("Enter")
-    except Exception as e:
-        logger.warning(f"Não foi possível preencher data '{data_str}': {e}")
-
-
-async def _click_search(page: Page) -> None:
-    try:
-        sel = SELECTORS["btn_pesquisar"]
-        await page.wait_for_selector(sel, timeout=5000)
-        await page.click(sel)
-    except Exception as e:
-        logger.warning(f"Não foi possível clicar em pesquisar: {e}")
-
-
-def _extract_from_xhr(responses: List[dict]) -> List[dict]:
+async def _extract_partes(page: Page) -> dict:
     """
-    Tenta extrair processos das respostas XHR capturadas.
-    O formato exato depende da versão do PJe — inspecionar network tab
-    para confirmar estrutura dos dados.
+    Extrai reclamante e empresa reclamada da página de detalhe.
+    Baseado no layout visto nas imagens: 'RECLAMANTE: ...' e 'RECLAMADO: ...'
     """
-    processos = []
-    for resp in responses:
-        body = resp.get("body")
-        if isinstance(body, list):
-            # Resposta é array de audiências diretamente
-            for item in body:
-                if isinstance(item, dict):
-                    try:
-                        processos.append(parse_processo_from_json(item))
-                    except Exception as e:
-                        logger.debug(f"Erro ao parsear item: {e}")
-        elif isinstance(body, dict):
-            # Procurar array aninhado: {"data": [...], "content": [...], etc.}
-            for key in ("data", "content", "audiencias", "pautas", "processos", "items"):
-                if key in body and isinstance(body[key], list):
-                    for item in body[key]:
-                        if isinstance(item, dict):
-                            try:
-                                processos.append(parse_processo_from_json(item))
-                            except Exception as e:
-                                logger.debug(f"Erro ao parsear item: {e}")
-                    if processos:
-                        break
+    result = {
+        "reclamante_nome": "",
+        "empresa_nome": "",
+        "empresa_cnpj": None,
+        "valor_causa": None,
+        "resumo_caso": "",
+    }
 
-    # Deduplicar por numero_processo
-    seen = set()
-    unique = []
-    for p in processos:
-        num = p.get("numero_processo", "")
-        if num and num not in seen:
-            seen.add(num)
-            unique.append(p)
+    try:
+        content = await page.content()
 
-    return unique
+        # Extrair RECLAMANTE
+        reclamante_match = re.search(
+            r"RECLAMANTE[:\s]+([A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇa-záàâãéêíóôõúüç\s]+?)(?=RECLAMADO|$)",
+            content,
+            re.IGNORECASE,
+        )
+        if reclamante_match:
+            result["reclamante_nome"] = reclamante_match.group(1).strip()
+
+        # Extrair RECLAMADO (empresa)
+        reclamado_match = re.search(
+            r"RECLAMADO[:\s]+([A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇa-záàâãéêíóôõúüç\s\-\.\/]+?)(?=\n|<|CNPJ|CPF|$)",
+            content,
+            re.IGNORECASE,
+        )
+        if reclamado_match:
+            result["empresa_nome"] = reclamado_match.group(1).strip()
+
+        # Tentar extrair CNPJ se presente
+        cnpj_match = re.search(r"\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}", content)
+        if cnpj_match:
+            result["empresa_cnpj"] = re.sub(r"\D", "", cnpj_match.group())
+
+        # Tentar extrair valor da causa
+        valor_match = re.search(r"[Vv]alor[:\s]+R?\$?\s*([\d.,]+)", content)
+        if valor_match:
+            try:
+                v = valor_match.group(1).replace(".", "").replace(",", ".")
+                result["valor_causa"] = float(v)
+            except ValueError:
+                pass
+
+    except Exception as e:
+        logger.warning(f"Erro ao extrair partes: {e}")
+
+    return result
