@@ -1,0 +1,131 @@
+import re
+from typing import Optional, List
+from datetime import datetime
+
+
+TIPO_MAP = {
+    "instrução": "instrucao",
+    "instrucao": "instrucao",
+    "una": "una",
+    "conciliação": "conciliacao",
+    "conciliacao": "conciliacao",
+}
+
+PROCESSO_REGEX = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
+CNPJ_REGEX = re.compile(r"\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}")
+VALOR_REGEX = re.compile(r"R?\$?\s*[\d.,]+")
+
+
+def parse_numero_processo(text: str) -> Optional[str]:
+    match = PROCESSO_REGEX.search(text)
+    return match.group() if match else None
+
+
+def extract_cnpj(text: str) -> Optional[str]:
+    match = CNPJ_REGEX.search(text)
+    if match:
+        return re.sub(r"\D", "", match.group())  # somente dígitos
+    return None
+
+
+def parse_valor_causa(text: str) -> Optional[float]:
+    if not text:
+        return None
+    cleaned = re.sub(r"[R$\s]", "", text).replace(".", "").replace(",", ".")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def normalize_tipo_audiencia(text: str) -> str:
+    if not text:
+        return "outra"
+    key = text.strip().lower()
+    return TIPO_MAP.get(key, "outra")
+
+
+def parse_data_audiencia(text: str) -> Optional[datetime]:
+    """Tenta parsear data no formato brasileiro: dd/MM/yyyy HH:mm"""
+    formats = [
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+    ]
+    text = text.strip()
+    for fmt in formats:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def parse_processo_from_json(raw: dict) -> dict:
+    """
+    Converte dado cru interceptado do XHR do PJe para o formato interno.
+    Os nomes de campos podem variar — ajustar conforme resposta real do PJe.
+    """
+    numero = (
+        raw.get("numeroProcesso")
+        or raw.get("numero_processo")
+        or raw.get("numProcesso")
+        or ""
+    )
+
+    valor_raw = (
+        raw.get("valorCausa")
+        or raw.get("valor_causa")
+        or raw.get("vlCausa")
+        or ""
+    )
+
+    data_raw = (
+        raw.get("dataAudiencia")
+        or raw.get("data_audiencia")
+        or raw.get("dtAudiencia")
+        or ""
+    )
+
+    tipo_raw = (
+        raw.get("tipoAudiencia")
+        or raw.get("tipo_audiencia")
+        or raw.get("descTipoAudiencia")
+        or ""
+    )
+
+    partes: List[dict] = raw.get("partes", raw.get("parts", []))
+    reclamante = next(
+        (p.get("nome", p.get("name", "")) for p in partes if _is_reclamante(p)), ""
+    )
+    reclamado = next(
+        (p for p in partes if _is_reclamado(p)), {}
+    )
+
+    empresa_nome = reclamado.get("nome", reclamado.get("name", ""))
+    empresa_cnpj = extract_cnpj(reclamado.get("cpfCnpj", reclamado.get("cnpj", "")))
+
+    return {
+        "numero_processo": parse_numero_processo(numero) or numero,
+        "orgao_julgador": raw.get("orgaoJulgador", raw.get("orgao_julgador", "")),
+        "valor_causa": parse_valor_causa(str(valor_raw)),
+        "data_audiencia": parse_data_audiencia(str(data_raw)),
+        "tipo_audiencia": normalize_tipo_audiencia(str(tipo_raw)),
+        "resumo_caso": raw.get("assunto", raw.get("resumo", "")),
+        "reclamante_nome": reclamante,
+        "empresa_nome": empresa_nome,
+        "empresa_cnpj": empresa_cnpj,
+        "raw_data": raw,
+    }
+
+
+def _is_reclamante(parte: dict) -> bool:
+    polo = parte.get("polo", parte.get("tipoParte", "")).lower()
+    return "reclamante" in polo or "ativo" in polo
+
+
+def _is_reclamado(parte: dict) -> bool:
+    polo = parte.get("polo", parte.get("tipoParte", "")).lower()
+    return "reclamado" in polo or "passivo" in polo or "reu" in polo

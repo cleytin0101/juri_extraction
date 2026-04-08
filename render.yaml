@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: juri-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: PJE_BASE_URL
+        value: https://pje.trt7.jus.br/consultaprocessual
+      - key: WHATSAPP_PROVIDER
+        value: mock
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SCRAPE_SCHEDULE_CRON
+        value: "0 7 * * 1-5"
+
+  - type: web
+    name: juri-frontend
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
