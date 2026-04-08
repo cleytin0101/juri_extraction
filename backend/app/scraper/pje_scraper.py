@@ -1,7 +1,12 @@
 """
-Scraper do PJe TRT-7 — 2 etapas:
+Scraper do PJe TRT-7 — Login PDPJ + 2 etapas:
 
-ETAPA 1: Lista de pautas (pública, sem CAPTCHA)
+ETAPA 0: Login via PDPJ SSO (CPF + Senha do advogado)
+  → Acessa pje.trt7.jus.br/primeirograu/login.seam
+  → Clica "Entrar com PDPJ" → redireciona para sso.cloud.pje.jus.br
+  → Preenche CPF e Senha → redireciona de volta ao PJe autenticado
+
+ETAPA 1: Lista de pautas (com sessão autenticada)
   → Acessa /consultaprocessual/pautas
   → Seleciona vara + data → extrai números de processo, horário, tipo
 
@@ -26,11 +31,52 @@ from .parser import parse_numero_processo, normalize_tipo_audiencia, parse_data_
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://pje.trt7.jus.br/consultaprocessual"
+LOGIN_URL = "https://pje.trt7.jus.br/primeirograu/login.seam"
 
 
-async def scrape_pauta(vara_nome: str, data_audiencia: date) -> List[dict]:
+async def _login_pdpj(page: Page, cpf: str, senha: str) -> bool:
     """
-    Pipeline completo: etapa 1 (lista) + etapa 2 (detalhe com CAPTCHA).
+    Autentica no PJe via PDPJ SSO (sso.cloud.pje.jus.br).
+    Fluxo: PJe login page → clica "Entrar com PDPJ" → PDPJ SSO → preenche CPF + senha → redirect de volta ao PJe.
+    """
+    try:
+        logger.info("Iniciando login no PDPJ...")
+        await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=20000)
+
+        # Clicar em "Entrar com PDPJ"
+        pdpj_btn = page.get_by_text("Entrar com PDPJ")
+        await pdpj_btn.wait_for(timeout=10000)
+        await pdpj_btn.click()
+
+        # Aguardar redirect para PDPJ SSO
+        await page.wait_for_url("**/sso.cloud.pje.jus.br/**", timeout=15000)
+        logger.info("Redirecionado para PDPJ SSO")
+
+        # Preencher CPF/CNPJ
+        cpf_input = page.locator("input[placeholder*='000'], input#username, input[name='username']").first
+        await cpf_input.wait_for(timeout=8000)
+        await cpf_input.fill(cpf)
+
+        # Preencher senha
+        senha_input = page.locator("input[type='password']").first
+        await senha_input.fill(senha)
+
+        # Clicar em ENTRAR
+        await page.click("button:has-text('ENTRAR')")
+
+        # Aguardar redirect de volta ao PJe
+        await page.wait_for_url("**/trt7.jus.br/**", timeout=20000)
+        logger.info("Login no PDPJ realizado com sucesso — sessão autenticada")
+        return True
+
+    except Exception as e:
+        logger.error(f"Erro no login PDPJ: {e}")
+        return False
+
+
+async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senha: str = "") -> List[dict]:
+    """
+    Pipeline completo: login PDPJ + etapa 1 (lista) + etapa 2 (detalhe com CAPTCHA).
     Retorna lista de processos com dados completos.
     """
     async with async_playwright() as p:
@@ -46,8 +92,17 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date) -> List[dict]:
         )
 
         try:
-            # ETAPA 1: extrair lista de audiências
             page = await context.new_page()
+
+            # ETAPA 0: Login via PDPJ SSO (se credenciais fornecidas)
+            if cpf and senha:
+                login_ok = await _login_pdpj(page, cpf, senha)
+                if not login_ok:
+                    logger.warning("Login falhou — tentando acessar pautas sem autenticação")
+            else:
+                logger.info("Sem credenciais — acessando pautas como consulta pública")
+
+            # ETAPA 1: extrair lista de audiências
             audiencias = await _scrape_lista_pautas(page, vara_nome, data_audiencia)
             logger.info(f"Etapa 1: {len(audiencias)} audiências encontradas em {vara_nome}")
 

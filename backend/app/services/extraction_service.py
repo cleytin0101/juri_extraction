@@ -3,6 +3,7 @@ import logging
 from datetime import date, datetime, timezone
 from typing import List
 
+from ..config import settings
 from ..database import get_supabase
 from ..scraper.pje_scraper import scrape_pauta
 from ..scraper.enricher import enrich_empresa
@@ -34,7 +35,7 @@ async def run_extraction(vara_id: str, data_audiencia: date) -> dict:
     # Scraping
     logger.info(f"Iniciando scraping: vara={vara_codigo}, data={data_audiencia}")
     try:
-        processos_raw = await scrape_pauta(vara_codigo, data_audiencia)
+        processos_raw = await scrape_pauta(vara_codigo, data_audiencia, cpf=settings.pje_cpf, senha=settings.pje_senha)
     except Exception as e:
         errors.append(f"Erro no scraping: {e}")
         logger.error(f"Scraping falhou: {e}")
