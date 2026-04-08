@@ -1,7 +1,8 @@
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
-import { LayoutDashboard, Download } from "lucide-react";
+import { LayoutDashboard, Download, Settings } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
 import { ExtractionPanel } from "./pages/ExtractionPanel";
+import { Configuracoes } from "./pages/Configuracoes";
 import clsx from "clsx";
 
 function Nav() {
@@ -32,6 +33,18 @@ function Nav() {
         <Download size={15} />
         Extrair Pauta
       </NavLink>
+      <NavLink
+        to="/configuracoes"
+        className={({ isActive }) =>
+          clsx(
+            "flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
+            isActive ? "bg-surface-700 text-white" : "text-gray-400 hover:text-white"
+          )
+        }
+      >
+        <Settings size={15} />
+        Configurações
+      </NavLink>
     </nav>
   );
 }
@@ -43,6 +56,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/extrair" element={<ExtractionPanel />} />
+        <Route path="/configuracoes" element={<Configuracoes />} />
       </Routes>
     </BrowserRouter>
   );

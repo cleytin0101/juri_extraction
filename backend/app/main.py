@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .tasks.scheduler import scheduler
-from .routers import pautas, extrair, leads, mensagem, metrics
+from .routers import pautas, extrair, leads, mensagem, metrics, configuracoes
 
 
 @asynccontextmanager
@@ -34,6 +34,7 @@ app.include_router(extrair.router)
 app.include_router(leads.router)
 app.include_router(mensagem.router)
 app.include_router(metrics.router)
+app.include_router(configuracoes.router)
 
 
 @app.get("/health")
