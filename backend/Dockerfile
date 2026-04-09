@@ -1,17 +1,10 @@
-FROM python:3.12-slim
-
-# Dependências mínimas para apt e pip
-RUN apt-get update && apt-get install -y \
-    curl wget ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+# Imagem oficial do Playwright — já vem com Chromium e todas as dependências de sistema
+FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Instala Chromium + todas as dependências de sistema automaticamente
-RUN playwright install --with-deps chromium
 
 COPY . .
 
