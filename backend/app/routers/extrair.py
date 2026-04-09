@@ -1,32 +1,92 @@
+import logging
+from datetime import datetime, timezone
+from typing import List
+
 from fastapi import APIRouter, BackgroundTasks
-from ..models.pauta import ExtrairRequest, ExtrairResponse
+from ..models.pauta import ExtrairRequest, ExtrairResponse, ExtrairJobStatus
 from ..services.extraction_service import run_extraction
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/extrair", tags=["extrair"])
 
-# Estado simples em memória para acompanhar extração em andamento
-_extraction_results: dict = {}
+# Estado em memória: key → job info (ordered insertion, Python 3.7+)
+_jobs: dict[str, dict] = {}
+_MAX_JOBS = 100  # manter só os últimos 100
 
 
 @router.post("", response_model=ExtrairResponse, status_code=202)
 async def extrair_pauta(req: ExtrairRequest, background_tasks: BackgroundTasks):
     """
-    Dispara extração de pauta em background.
-    Retorna 202 imediatamente; polling em GET /api/metrics para ver progresso.
+    Dispara extração de pauta em background para cada combinação (vara, data).
+    Retorna 202 imediatamente.
     """
-    key = f"{req.vara_id}_{req.data}"
-    _extraction_results[key] = {"status": "running"}
+    keys: List[str] = []
 
-    async def _run():
-        result = await run_extraction(req.vara_id, req.data)
-        _extraction_results[key] = {"status": "done", **result}
+    for vara_id in req.vara_ids:
+        for data in req.datas:
+            key = f"{vara_id}_{data.isoformat()}"
+            _jobs[key] = {
+                "key": key,
+                "vara_id": vara_id,
+                "data": data.isoformat(),
+                "status": "running",
+                "processos_encontrados": 0,
+                "leads_criados": 0,
+                "errors": [],
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+            keys.append(key)
 
-    background_tasks.add_task(_run)
+            # Captura de variáveis no closure
+            _vara_id = vara_id
+            _data = data
+            _key = key
 
-    return ExtrairResponse(
-        processos_encontrados=0,
-        leads_criados=0,
-        errors=[],
-        vara_id=req.vara_id,
-        data=req.data,
-    )
+            async def _run(vara_id=_vara_id, data=_data, key=_key):
+                try:
+                    result = await run_extraction(vara_id, data)
+                    _jobs[key] = {
+                        **_jobs[key],
+                        "status": "done",
+                        "processos_encontrados": result.get("processos_encontrados", 0),
+                        "leads_criados": result.get("leads_criados", 0),
+                        "errors": result.get("errors", []),
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                except Exception as e:
+                    logger.error(f"Job {key} falhou: {e}")
+                    _jobs[key] = {
+                        **_jobs[key],
+                        "status": "error",
+                        "errors": [str(e)],
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                    }
+
+            background_tasks.add_task(_run)
+
+    # Limitar tamanho do histórico
+    if len(_jobs) > _MAX_JOBS:
+        oldest_keys = list(_jobs.keys())[: len(_jobs) - _MAX_JOBS]
+        for k in oldest_keys:
+            del _jobs[k]
+
+    return ExtrairResponse(jobs_iniciados=len(keys), keys=keys)
+
+
+@router.get("/status", response_model=List[ExtrairJobStatus])
+def get_status():
+    """Retorna os últimos jobs de extração (mais recente primeiro)."""
+    jobs = list(_jobs.values())
+    jobs.reverse()
+    return [
+        ExtrairJobStatus(
+            key=j["key"],
+            vara_id=j["vara_id"],
+            data=j["data"],
+            status=j["status"],
+            processos_encontrados=j.get("processos_encontrados", 0),
+            leads_criados=j.get("leads_criados", 0),
+            errors=j.get("errors", []),
+        )
+        for j in jobs[:20]
+    ]

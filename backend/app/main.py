@@ -2,13 +2,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import settings
+from .config import settings, load_runtime_credentials
 from .tasks.scheduler import scheduler
 from .routers import pautas, extrair, leads, mensagem, metrics, configuracoes
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    load_runtime_credentials()
     scheduler.start()
     yield
     scheduler.shutdown()

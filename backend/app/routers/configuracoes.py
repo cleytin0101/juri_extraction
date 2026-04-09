@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
-from ..config import settings
+from ..config import settings, save_runtime_credentials
 
 router = APIRouter(prefix="/api/configuracoes", tags=["configuracoes"])
 
@@ -30,3 +30,14 @@ def get_configuracoes():
         pje_senha_configurada=bool(settings.pje_senha),
         whatsapp_provider=settings.whatsapp_provider,
     )
+
+
+@router.post("")
+def post_configuracoes(body: ConfiguracoesUpdate):
+    save_runtime_credentials(
+        pje_cpf=body.pje_cpf if body.pje_cpf is not None else settings.pje_cpf,
+        pje_senha=body.pje_senha if body.pje_senha is not None else settings.pje_senha,
+        advogado_nome=body.advogado_nome if body.advogado_nome is not None else settings.advogado_nome,
+        advogado_contato=body.advogado_contato if body.advogado_contato is not None else settings.advogado_contato,
+    )
+    return {"ok": True}

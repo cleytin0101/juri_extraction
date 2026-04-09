@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Save, Eye, EyeOff, CheckCircle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Save, Eye, EyeOff, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { getConfiguracoes, saveConfiguracoes } from "../api/configuracoes";
 
 export function Configuracoes() {
   const [advogadoNome, setAdvogadoNome] = useState("");
@@ -7,13 +8,43 @@ export function Configuracoes() {
   const [pjeCpf, setPjeCpf] = useState("");
   const [pjeSenha, setPjeSenha] = useState("");
   const [showSenha, setShowSenha] = useState(false);
+  const [senhaConfigurada, setSenhaConfigurada] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSave = () => {
-    // As credenciais são variáveis de ambiente no backend (Render).
-    // Esta tela mostra ao usuário o que precisa configurar lá.
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  useEffect(() => {
+    getConfiguracoes()
+      .then((data) => {
+        setAdvogadoNome(data.advogado_nome);
+        setAdvogadoContato(data.advogado_contato);
+        setPjeCpf(data.pje_cpf);
+        setSenhaConfigurada(data.pje_senha_configurada);
+      })
+      .catch(() => {/* silently ignore load errors */});
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+    setSaved(false);
+    try {
+      await saveConfiguracoes({
+        advogado_nome: advogadoNome,
+        advogado_contato: advogadoContato,
+        pje_cpf: pjeCpf,
+        // Only send senha if user typed something new
+        ...(pjeSenha ? { pje_senha: pjeSenha } : {}),
+      });
+      setSaved(true);
+      setSenhaConfigurada(senhaConfigurada || !!pjeSenha);
+      setPjeSenha("");
+      setTimeout(() => setSaved(false), 4000);
+    } catch {
+      setError("Erro ao salvar. Verifique se o backend está rodando.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -59,10 +90,7 @@ export function Configuracoes() {
             Acesso PJe (Advogado)
           </h2>
           <p className="text-gray-500 text-xs">
-            Login do advogado no PJe para acessar detalhes dos processos.
-            Configure como variáveis de ambiente no Render:
-            <span className="text-accent-yellow font-mono"> PJE_CPF</span> e
-            <span className="text-accent-yellow font-mono"> PJE_SENHA</span>.
+            Login do advogado no PJe via PDPJ para acessar e baixar os documentos dos processos.
           </p>
 
           <div>
@@ -77,11 +105,16 @@ export function Configuracoes() {
           </div>
 
           <div>
-            <label className="text-gray-400 text-sm block mb-1">Senha do PJe</label>
+            <label className="text-gray-400 text-sm block mb-1">
+              Senha do PJe
+              {senhaConfigurada && !pjeSenha && (
+                <span className="ml-2 text-accent-green text-xs font-normal">● configurada</span>
+              )}
+            </label>
             <div className="relative">
               <input
                 type={showSenha ? "text" : "password"}
-                placeholder="••••••••"
+                placeholder={senhaConfigurada ? "••••••• (deixe em branco para manter)" : "••••••••"}
                 value={pjeSenha}
                 onChange={(e) => setPjeSenha(e.target.value)}
                 className="w-full bg-surface-700 border border-surface-600 rounded-lg px-3 py-2 pr-10 text-white text-sm focus:outline-none focus:border-accent-blue"
@@ -94,19 +127,6 @@ export function Configuracoes() {
                 {showSenha ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
-          </div>
-
-          {/* Instruções Render */}
-          <div className="bg-surface-700 rounded-lg p-3 text-xs text-gray-400 space-y-1">
-            <p className="text-white font-medium mb-2">Como configurar no Render:</p>
-            <p>1. Acesse seu serviço <span className="text-accent-blue">juri-backend</span> no Render</p>
-            <p>2. Vá em <span className="text-white">Environment → Add Environment Variable</span></p>
-            <p>3. Adicione:</p>
-            <p className="font-mono text-accent-yellow pl-2">PJE_CPF = seu CPF</p>
-            <p className="font-mono text-accent-yellow pl-2">PJE_SENHA = sua senha</p>
-            <p className="font-mono text-accent-yellow pl-2">ADVOGADO_NOME = seu nome</p>
-            <p className="font-mono text-accent-yellow pl-2">ADVOGADO_CONTATO = seu contato</p>
-            <p>4. Clique em <span className="text-white">Save Changes</span> — o serviço reinicia automaticamente</p>
           </div>
         </div>
 
@@ -124,24 +144,32 @@ O processo nº [NÚMERO] envolve [RECLAMANTE] e o valor da causa é de *[VALOR]*
 
 Ofereço assistência jurídica especializada em defesa de empresas em ações trabalhistas. Posso analisar o caso sem compromisso e apresentar uma proposta de honorários.
 
-${advogadoNome ? advogadoNome : "[SEU NOME]"}
-${advogadoContato ? advogadoContato : "[SEU CONTATO]"}`}
+${advogadoNome || "[SEU NOME]"}
+${advogadoContato || "[SEU CONTATO]"}`}
           </div>
         </div>
 
         {saved && (
           <div className="flex items-center gap-2 text-accent-green text-sm">
             <CheckCircle size={16} />
-            Salvo! Lembre de configurar as variáveis de ambiente no Render.
+            Configurações salvas com sucesso!
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center gap-2 text-accent-red text-sm">
+            <AlertCircle size={16} />
+            {error}
           </div>
         )}
 
         <button
           onClick={handleSave}
-          className="w-full flex items-center justify-center gap-2 bg-accent-blue hover:bg-blue-500 text-white font-medium py-2.5 rounded-lg transition-colors"
+          disabled={saving}
+          className="w-full flex items-center justify-center gap-2 bg-accent-blue hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors"
         >
-          <Save size={16} />
-          Salvar Configurações
+          {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+          {saving ? "Salvando..." : "Salvar Configurações"}
         </button>
       </div>
     </div>

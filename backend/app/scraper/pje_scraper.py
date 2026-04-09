@@ -26,7 +26,7 @@ from playwright.async_api import async_playwright, Page
 
 from .selectors import SELECTORS, TABLE_COLUMNS
 from .captcha_solver import solve_captcha_bytes
-from .parser import parse_numero_processo, normalize_tipo_audiencia, parse_data_audiencia
+from .parser import parse_numero_processo, normalize_tipo_audiencia, parse_data_audiencia, parse_pdf_text
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,14 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
     captcha_img = page.locator(SELECTORS["captcha_img"])
     if await captcha_img.count() == 0:
         # Sem CAPTCHA — página carregou direto
-        return await _extract_partes(page)
+        html_data = await _extract_partes(page)
+        pdf_bytes = await _download_processo_pdf(page, numero)
+        if pdf_bytes:
+            pdf_data = parse_pdf_text(pdf_bytes)
+            for key in ("reclamante_nome", "empresa_nome", "empresa_cnpj", "valor_causa", "resumo_caso"):
+                if pdf_data.get(key):
+                    html_data[key] = pdf_data[key]
+        return html_data
 
     # Resolver CAPTCHA (até 3 tentativas)
     for tentativa in range(1, 4):
@@ -299,15 +306,71 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
                 captcha_img = page.locator(SELECTORS["captcha_img"])
                 continue
 
-            # CAPTCHA aceito — extrair dados
+            # CAPTCHA aceito — extrair dados do HTML e do PDF
             logger.info(f"CAPTCHA resolvido com sucesso (tentativa {tentativa})")
-            return await _extract_partes(page)
+            html_data = await _extract_partes(page)
+
+            # Tentar baixar o PDF completo e enriquecer com dados dele
+            pdf_bytes = await _download_processo_pdf(page, numero)
+            if pdf_bytes:
+                pdf_data = parse_pdf_text(pdf_bytes)
+                # Campos do PDF têm prioridade sobre regex do HTML
+                for key in ("reclamante_nome", "empresa_nome", "empresa_cnpj", "valor_causa", "resumo_caso"):
+                    if pdf_data.get(key):
+                        html_data[key] = pdf_data[key]
+
+            return html_data
 
         except Exception as e:
             logger.warning(f"Erro na tentativa {tentativa} do CAPTCHA de {numero}: {e}")
 
     logger.warning(f"Não foi possível resolver CAPTCHA de {numero} após 3 tentativas")
     return None
+
+
+async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
+    """
+    Clica no botão 'Baixar processo na íntegra' e retorna os bytes do PDF baixado.
+    O download é interceptado pelo Playwright antes de tocar o disco.
+    """
+    try:
+        # O botão aparece como ícone PDF ou link com esse texto
+        download_btn = page.locator(
+            "a[title*='ntegra'], a[href*='baixar'], a[href*='inteira'], "
+            "button:has-text('ntegra'), a:has-text('ntegra')"
+        ).first
+
+        if await download_btn.count() == 0:
+            # Fallback: qualquer link que pareça download de processo
+            download_btn = page.locator("a[href*='.pdf'], a[href*='download']").first
+
+        if await download_btn.count() == 0:
+            logger.warning(f"Botão de download não encontrado para {numero}")
+            return None
+
+        async with page.expect_download(timeout=60000) as download_info:
+            await download_btn.click()
+
+        download = await download_info.value
+        pdf_bytes = await (await download.path()).read_bytes() if await download.path() else None
+
+        # Alternativa: ler do stream
+        if pdf_bytes is None:
+            stream = await download.open_read_stream()
+            chunks = []
+            while True:
+                chunk = await stream.read(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            pdf_bytes = b"".join(chunks)
+
+        logger.info(f"PDF baixado para {numero}: {len(pdf_bytes or b'')} bytes")
+        return pdf_bytes
+
+    except Exception as e:
+        logger.warning(f"Erro ao baixar PDF de {numero}: {e}")
+        return None
 
 
 async def _extract_partes(page: Page) -> dict:

@@ -1,6 +1,10 @@
+import io
+import logging
 import re
 from typing import Optional, List
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 TIPO_MAP = {
@@ -129,3 +133,73 @@ def _is_reclamante(parte: dict) -> bool:
 def _is_reclamado(parte: dict) -> bool:
     polo = parte.get("polo", parte.get("tipoParte", "")).lower()
     return "reclamado" in polo or "passivo" in polo or "reu" in polo
+
+
+def parse_pdf_text(pdf_bytes: bytes) -> dict:
+    """
+    Extrai campos estruturados do PDF completo do processo (baixado via 'Baixar processo na íntegra').
+    Retorna dict com: reclamante_nome, empresa_nome, empresa_cnpj, valor_causa, resumo_caso.
+    Campos não encontrados ficam como None/"".
+    """
+    result: dict = {
+        "reclamante_nome": "",
+        "empresa_nome": "",
+        "empresa_cnpj": None,
+        "valor_causa": None,
+        "resumo_caso": "",
+    }
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            pages_text = []
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                pages_text.append(text)
+            full_text = "\n".join(pages_text)
+    except Exception as e:
+        logger.warning(f"Erro ao ler PDF com pdfplumber: {e}")
+        return result
+
+    # RECLAMANTE
+    m = re.search(
+        r"RECLAMANTE[:\s]+([A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇa-záàâãéêíóôõúüç\s]+?)(?=RECLAMAD|CPF|$)",
+        full_text,
+        re.IGNORECASE,
+    )
+    if m:
+        result["reclamante_nome"] = m.group(1).strip()
+
+    # RECLAMADO / empresa
+    m = re.search(
+        r"RECLAMAD[AO][:\s]+([A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇa-záàâãéêíóôõúüç\s\-\.\/]+?)(?=\n|CPF|CNPJ|$)",
+        full_text,
+        re.IGNORECASE,
+    )
+    if m:
+        result["empresa_nome"] = m.group(1).strip()
+
+    # CNPJ — primeiro encontrado após RECLAMADO
+    reclamado_pos = full_text.lower().find("reclamad")
+    search_text = full_text[reclamado_pos:] if reclamado_pos >= 0 else full_text
+    cnpj_m = CNPJ_REGEX.search(search_text)
+    if cnpj_m:
+        result["empresa_cnpj"] = re.sub(r"\D", "", cnpj_m.group())
+
+    # Valor da causa
+    valor_m = re.search(
+        r"[Vv]alor\s+da\s+[Cc]ausa[:\s]+R?\$?\s*([\d.,]+)",
+        full_text,
+    )
+    if valor_m:
+        result["valor_causa"] = parse_valor_causa(valor_m.group(1))
+
+    # Resumo: pegar as primeiras linhas do primeiro despacho/decisão
+    resumo_m = re.search(
+        r"(?:DESPACHO|DECISÃO|SENTENÇA)[^\n]*\n(.{50,500})",
+        full_text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if resumo_m:
+        result["resumo_caso"] = resumo_m.group(1).strip()[:500]
+
+    return result

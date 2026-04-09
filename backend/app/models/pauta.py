@@ -10,16 +10,23 @@ class Vara(BaseModel):
 
 
 class ExtrairRequest(BaseModel):
+    vara_ids: List[str]
+    datas: List[date]
+
+
+class ExtrairJobStatus(BaseModel):
+    key: str
     vara_id: str
     data: date
+    status: str  # "running" | "done" | "error"
+    processos_encontrados: int = 0
+    leads_criados: int = 0
+    errors: List[str] = []
 
 
 class ExtrairResponse(BaseModel):
-    processos_encontrados: int
-    leads_criados: int
-    errors: List[str]
-    vara_id: str
-    data: date
+    jobs_iniciados: int
+    keys: List[str]
 
 
 class PautasResponse(BaseModel):

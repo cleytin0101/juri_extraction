@@ -27,15 +27,15 @@ async def run_extraction(vara_id: str, data_audiencia: date) -> dict:
         return {"processos_encontrados": 0, "leads_criados": 0, "errors": [f"Vara {vara_id} não encontrada"]}
 
     vara = vara_result.data
-    vara_codigo = vara["codigo"]
+    vara_nome = vara["nome"]
 
     # Criar ou recuperar registro de pauta
     pauta_id = _upsert_pauta(sb, vara_id, data_audiencia)
 
     # Scraping
-    logger.info(f"Iniciando scraping: vara={vara_codigo}, data={data_audiencia}")
+    logger.info(f"Iniciando scraping: vara={vara_nome}, data={data_audiencia}")
     try:
-        processos_raw = await scrape_pauta(vara_codigo, data_audiencia, cpf=settings.pje_cpf, senha=settings.pje_senha)
+        processos_raw = await scrape_pauta(vara_nome, data_audiencia, cpf=settings.pje_cpf, senha=settings.pje_senha)
     except Exception as e:
         errors.append(f"Erro no scraping: {e}")
         logger.error(f"Scraping falhou: {e}")
