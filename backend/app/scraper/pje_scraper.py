@@ -20,6 +20,7 @@ import asyncio
 import logging
 import re
 from datetime import date
+from pathlib import Path
 from typing import List, Optional
 
 from playwright.async_api import async_playwright, Page
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://pje.trt7.jus.br/consultaprocessual"
 LOGIN_URL = "https://pje.trt7.jus.br/primeirograu/login.seam"
+SESSION_FILE = Path(__file__).parent.parent.parent / "pje_session.json"
 
 
 async def _login_pdpj(page: Page, cpf: str, senha: str) -> bool:
@@ -74,14 +76,28 @@ async def _login_pdpj(page: Page, cpf: str, senha: str) -> bool:
         return False
 
 
+async def _is_session_valid(context) -> bool:
+    """Verifica se a sessão salva ainda está autenticada no PJe."""
+    try:
+        page = await context.new_page()
+        await page.goto(f"{BASE_URL}/pautas", wait_until="domcontentloaded", timeout=15000)
+        # Se redirecionar para login, a sessão expirou
+        is_valid = "login" not in page.url and "sso.cloud.pje" not in page.url
+        await page.close()
+        return is_valid
+    except Exception:
+        return False
+
+
 async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senha: str = "") -> List[dict]:
     """
     Pipeline completo: login PDPJ + etapa 1 (lista) + etapa 2 (detalhe com CAPTCHA).
-    Retorna lista de processos com dados completos.
+    Tenta reutilizar sessão salva em pje_session.json antes de fazer novo login.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
+
+        base_context_args = dict(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -91,16 +107,40 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
             timezone_id="America/Fortaleza",
         )
 
+        # Tentar carregar sessão salva
+        context = None
+        if SESSION_FILE.exists():
+            try:
+                context = await browser.new_context(
+                    storage_state=str(SESSION_FILE),
+                    **base_context_args,
+                )
+                if await _is_session_valid(context):
+                    logger.info("Sessão PJe salva reutilizada com sucesso.")
+                else:
+                    logger.info("Sessão PJe expirada — será feito novo login.")
+                    await context.close()
+                    SESSION_FILE.unlink(missing_ok=True)
+                    context = None
+            except Exception as e:
+                logger.warning(f"Erro ao carregar sessão salva: {e}")
+                context = None
+
+        if context is None:
+            context = await browser.new_context(**base_context_args)
+
         try:
             page = await context.new_page()
 
-            # ETAPA 0: Login via PDPJ SSO (se credenciais fornecidas)
-            if cpf and senha:
+            # ETAPA 0: Login via PDPJ SSO (apenas se não há sessão válida)
+            if SESSION_FILE.exists():
+                logger.info("Usando sessão autenticada existente.")
+            elif cpf and senha:
                 login_ok = await _login_pdpj(page, cpf, senha)
                 if not login_ok:
                     logger.warning("Login falhou — tentando acessar pautas sem autenticação")
             else:
-                logger.info("Sem credenciais — acessando pautas como consulta pública")
+                logger.info("Sem credenciais e sem sessão — acessando pautas como consulta pública")
 
             # ETAPA 1: extrair lista de audiências
             audiencias = await _scrape_lista_pautas(page, vara_nome, data_audiencia)

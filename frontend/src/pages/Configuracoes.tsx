@@ -1,6 +1,13 @@
-import { useState, useEffect } from "react";
-import { Save, Eye, EyeOff, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Save, Eye, EyeOff, CheckCircle, AlertCircle, Loader2, Wifi, WifiOff, KeyRound } from "lucide-react";
 import { getConfiguracoes, saveConfiguracoes } from "../api/configuracoes";
+import {
+  iniciarLogin,
+  getLoginStatus,
+  submitOtp,
+  getConnectionStatus,
+} from "../api/auth";
+import type { StatusResponse } from "../api/auth";
 
 export function Configuracoes() {
   const [advogadoNome, setAdvogadoNome] = useState("");
@@ -13,6 +20,16 @@ export function Configuracoes() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
+  // Estado da conexão PJe
+  const [connected, setConnected] = useState(false);
+  const [connectedSince, setConnectedSince] = useState<string | null>(null);
+  const [loginStatus, setLoginStatus] = useState<StatusResponse | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     getConfiguracoes()
       .then((data) => {
@@ -22,7 +39,68 @@ export function Configuracoes() {
         setSenhaConfigurada(data.pje_senha_configurada);
       })
       .catch(() => {/* silently ignore load errors */});
+
+    getConnectionStatus()
+      .then((data) => {
+        setConnected(data.conectado);
+        setConnectedSince(data.salvo_em);
+      })
+      .catch(() => {});
   }, []);
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const startPolling = (sid: string) => {
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await getLoginStatus(sid);
+        setLoginStatus(status);
+        if (status.status === "sucesso") {
+          stopPolling();
+          setConnecting(false);
+          setConnected(true);
+          setConnectedSince(new Date().toISOString());
+          setSessionId(null);
+        } else if (status.status === "erro") {
+          stopPolling();
+          setConnecting(false);
+        }
+      } catch {
+        // ignore transient errors
+      }
+    }, 2000);
+  };
+
+  const handleConectar = async () => {
+    setConnecting(true);
+    setLoginStatus(null);
+    setOtpCode("");
+    setOtpError("");
+    try {
+      const { session_id } = await iniciarLogin(pjeCpf || undefined, pjeSenha || undefined);
+      setSessionId(session_id);
+      startPolling(session_id);
+    } catch {
+      setConnecting(false);
+      setLoginStatus({ status: "erro", mensagem: "Erro ao iniciar conexão. Backend offline?" });
+    }
+  };
+
+  const handleSubmitOtp = async () => {
+    if (!sessionId || !otpCode.trim()) return;
+    setOtpError("");
+    const result = await submitOtp(sessionId, otpCode.trim());
+    if (!result.ok) {
+      setOtpError(result.erro || "Erro ao enviar código.");
+    }
+    setOtpCode("");
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -82,6 +160,100 @@ export function Configuracoes() {
               className="w-full bg-surface-700 border border-surface-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-accent-blue"
             />
           </div>
+        </div>
+
+        {/* Conexão PJe */}
+        <div className="bg-surface-800 rounded-xl border border-surface-600 p-6 space-y-4">
+          <h2 className="text-white font-semibold text-sm uppercase tracking-wide text-accent-blue">
+            Conexão PJe
+          </h2>
+
+          {/* Status */}
+          <div className="flex items-center gap-2 text-sm">
+            {connected ? (
+              <>
+                <Wifi size={16} className="text-accent-green" />
+                <span className="text-accent-green font-medium">Conectado</span>
+                {connectedSince && (
+                  <span className="text-gray-500 text-xs ml-1">
+                    (sessão salva em {new Date(connectedSince).toLocaleString("pt-BR")})
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <WifiOff size={16} className="text-gray-500" />
+                <span className="text-gray-400">Desconectado</span>
+              </>
+            )}
+          </div>
+
+          {/* Progresso / mensagem de status */}
+          {loginStatus && (
+            <div className={`flex items-start gap-2 text-sm rounded-lg px-3 py-2 ${
+              loginStatus.status === "erro"
+                ? "bg-red-900/30 text-accent-red"
+                : loginStatus.status === "sucesso"
+                ? "bg-green-900/30 text-accent-green"
+                : "bg-surface-700 text-gray-300"
+            }`}>
+              {loginStatus.status === "iniciando" && (
+                <Loader2 size={14} className="mt-0.5 animate-spin shrink-0" />
+              )}
+              {loginStatus.status === "aguardando_otp" && (
+                <KeyRound size={14} className="mt-0.5 shrink-0 text-yellow-400" />
+              )}
+              <span>{loginStatus.mensagem}</span>
+            </div>
+          )}
+
+          {/* Campo OTP — aparece quando o PDPJ pede o código */}
+          {loginStatus?.status === "aguardando_otp" && (
+            <div className="space-y-2">
+              <label className="text-gray-300 text-sm block">
+                Código do app autenticador
+                <span className="text-gray-500 text-xs ml-2">(muda a cada 30 segundos)</span>
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={8}
+                  placeholder="000000"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                  onKeyDown={(e) => e.key === "Enter" && handleSubmitOtp()}
+                  className="flex-1 bg-surface-700 border border-yellow-500/50 rounded-lg px-3 py-2 text-white text-sm font-mono tracking-widest focus:outline-none focus:border-yellow-400"
+                  autoFocus
+                />
+                <button
+                  onClick={handleSubmitOtp}
+                  disabled={otpCode.length < 6}
+                  className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  Confirmar
+                </button>
+              </div>
+              {otpError && (
+                <p className="text-accent-red text-xs flex items-center gap-1">
+                  <AlertCircle size={12} /> {otpError}
+                </p>
+              )}
+            </div>
+          )}
+
+          <button
+            onClick={handleConectar}
+            disabled={connecting || loginStatus?.status === "aguardando_otp"}
+            className="flex items-center gap-2 px-4 py-2 bg-surface-700 hover:bg-surface-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg border border-surface-500 transition-colors"
+          >
+            {connecting && loginStatus?.status !== "aguardando_otp" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Wifi size={14} />
+            )}
+            {connected ? "Reconectar ao PJe" : "Conectar ao PJe"}
+          </button>
         </div>
 
         {/* Credenciais PJe */}
