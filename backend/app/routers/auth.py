@@ -205,9 +205,21 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                 senha_input = page.locator("input[type='password']").first
                 await senha_input.fill(senha)
 
-                # 6. Clicar em ENTRAR
+                # 6. Clicar em ENTRAR — tenta múltiplos seletores
                 session.mensagem = "Enviando credenciais..."
-                await page.click("button:has-text('ENTRAR')")
+                # Screenshot para diagnóstico (mostra a página do SSO antes de clicar)
+                debug_path = Path(__file__).parent.parent.parent / "debug_sso.png"
+                await page.screenshot(path=str(debug_path))
+                logger.info(f"Screenshot do SSO salvo em {debug_path} | URL: {page.url}")
+
+                entrar_btn = page.locator(
+                    "button[type='submit'], input[type='submit'], "
+                    "button:has-text('Entrar'), button:has-text('ENTRAR'), "
+                    "button:has-text('Login'), button:has-text('Acessar'), "
+                    "button:has-text('Continuar'), button:has-text('Prosseguir')"
+                ).first
+                await entrar_btn.wait_for(state="visible", timeout=15000)
+                await entrar_btn.click()
 
                 # 7. Aguardar: redirect para PJe (sucesso sem 2FA) ou campo de código
                 for _ in range(60):  # aguarda até 30s

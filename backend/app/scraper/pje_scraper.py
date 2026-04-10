@@ -69,8 +69,15 @@ async def _login_pdpj(page: Page, cpf: str, senha: str) -> bool:
         senha_input = page.locator("input[type='password']").first
         await senha_input.fill(senha)
 
-        # Clicar em ENTRAR
-        await page.click("button:has-text('ENTRAR')")
+        # Clicar em ENTRAR — tenta múltiplos seletores
+        entrar_btn = page.locator(
+            "button[type='submit'], input[type='submit'], "
+            "button:has-text('Entrar'), button:has-text('ENTRAR'), "
+            "button:has-text('Login'), button:has-text('Acessar'), "
+            "button:has-text('Continuar'), button:has-text('Prosseguir')"
+        ).first
+        await entrar_btn.wait_for(state="visible", timeout=15000)
+        await entrar_btn.click()
 
         # Aguardar redirect de volta ao PJe
         await page.wait_for_url("**/trt7.jus.br/**", timeout=20000)
