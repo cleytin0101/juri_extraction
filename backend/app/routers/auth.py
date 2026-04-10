@@ -30,17 +30,29 @@ router = APIRouter(prefix="/api/auth/pdpj", tags=["auth"])
 LOGIN_URL = "https://pje.trt7.jus.br/primeirograu/login.seam"
 SESSION_FILE = Path(__file__).parent.parent.parent / "pje_session.json"
 
-# Seletores para detectar campo de TOTP no PDPJ SSO
+# Seletores para detectar campo de código de verificação no PDPJ SSO
+# Cobre: app autenticador (TOTP), SMS, e-mail, e variações do PDPJ
 OTP_SELECTORS = [
-    "input[placeholder*='digo']",        # "código"
-    "input[name*='otp']",
-    "input[name*='token']",
-    "input[name*='totp']",
-    "input[name*='code']",
-    "input[id*='otp']",
-    "input[id*='token']",
-    "input[id*='totp']",
     "input[autocomplete='one-time-code']",
+    "input[name*='otp']",
+    "input[name*='totp']",
+    "input[name*='token']",
+    "input[name*='code']",
+    "input[name*='codigo']",
+    "input[name*='verification']",
+    "input[id*='otp']",
+    "input[id*='totp']",
+    "input[id*='token']",
+    "input[id*='code']",
+    "input[id*='codigo']",
+    "input[placeholder*='digo']",       # "código" / "Código"
+    "input[placeholder*='verificacao']",
+    "input[placeholder*='verificação']",
+    "input[placeholder*='autenticad']",  # "autenticador"
+    "input[aria-label*='digo']",
+    "input[aria-label*='OTP']",
+    "input[aria-label*='token']",
+    "input[type='tel'][maxlength]",      # campo numérico com limite (típico de OTP)
 ]
 
 
@@ -157,10 +169,25 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                 session.mensagem = "Acessando portal PJe..."
                 await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=20000)
 
-                # 2. Clicar em "Entrar com PDPJ"
+                # 2. Clicar no botão de login PDPJ
+                # Tenta múltiplos seletores para cobrir variações de texto/estrutura
                 session.mensagem = "Clicando em 'Entrar com PDPJ'..."
-                pdpj_btn = page.get_by_text("Entrar com PDPJ")
-                await pdpj_btn.wait_for(timeout=10000)
+                pdpj_btn = page.locator(
+                    "a:has-text('PDPJ'), button:has-text('PDPJ'), "
+                    "[class*='pdpj'], [id*='pdpj'], "
+                    "a:has-text('Entrar com PDPJ'), button:has-text('Entrar com PDPJ')"
+                ).first
+                try:
+                    await pdpj_btn.wait_for(state="visible", timeout=20000)
+                except Exception:
+                    # Salvar screenshot para diagnóstico e mostrar URL atual
+                    screenshot_path = Path(__file__).parent.parent.parent / "debug_login.png"
+                    await page.screenshot(path=str(screenshot_path))
+                    logger.error(
+                        f"Botão PDPJ não encontrado. URL atual: {page.url} | "
+                        f"Screenshot salvo em {screenshot_path}"
+                    )
+                    raise
                 await pdpj_btn.click()
 
                 # 3. Aguardar redirect para PDPJ SSO
@@ -182,8 +209,8 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                 session.mensagem = "Enviando credenciais..."
                 await page.click("button:has-text('ENTRAR')")
 
-                # 7. Aguardar: redirect para PJe (sucesso sem 2FA) ou campo TOTP
-                for _ in range(30):  # aguarda até 15s
+                # 7. Aguardar: redirect para PJe (sucesso sem 2FA) ou campo de código
+                for _ in range(60):  # aguarda até 30s
                     await asyncio.sleep(0.5)
 
                     # Sucesso direto (sem 2FA)
@@ -199,7 +226,7 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                         otp_field = page.locator(sel)
                         if await otp_field.count() > 0:
                             session.status = "aguardando_otp"
-                            session.mensagem = "Digite o código do seu app autenticador."
+                            session.mensagem = "Digite o código de verificação (app autenticador, SMS ou e-mail)."
                             logger.info("PDPJ solicitou código TOTP.")
 
                             # Aguardar o usuário fornecer o código (timeout de 3 min)
@@ -216,8 +243,13 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
 
                             # Submeter (Enter ou botão)
                             submit_btn = page.locator(
-                                "button[type='submit'], button:has-text('CONFIRMAR'), "
-                                "button:has-text('VERIFICAR'), button:has-text('ENTRAR')"
+                                "button[type='submit'], "
+                                "button:has-text('CONFIRMAR'), "
+                                "button:has-text('VERIFICAR'), "
+                                "button:has-text('ENTRAR'), "
+                                "button:has-text('CONTINUAR'), "
+                                "button:has-text('ENVIAR'), "
+                                "input[type='submit']"
                             ).first
                             if await submit_btn.count() > 0:
                                 await submit_btn.click()

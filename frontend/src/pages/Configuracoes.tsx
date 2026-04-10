@@ -218,8 +218,8 @@ export function Configuracoes() {
           {loginStatus?.status === "aguardando_otp" && (
             <div className="space-y-2">
               <label className="text-gray-300 text-sm block">
-                Código do app autenticador
-                <span className="text-gray-500 text-xs ml-2">(muda a cada 30 segundos)</span>
+                Código de verificação
+                <span className="text-gray-500 text-xs ml-2">(app autenticador, SMS ou e-mail)</span>
               </label>
               <div className="flex gap-2">
                 <input

@@ -47,9 +47,13 @@ async def _login_pdpj(page: Page, cpf: str, senha: str) -> bool:
         logger.info("Iniciando login no PDPJ...")
         await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=20000)
 
-        # Clicar em "Entrar com PDPJ"
-        pdpj_btn = page.get_by_text("Entrar com PDPJ")
-        await pdpj_btn.wait_for(timeout=10000)
+        # Clicar no botão de login PDPJ (tenta múltiplos seletores)
+        pdpj_btn = page.locator(
+            "a:has-text('PDPJ'), button:has-text('PDPJ'), "
+            "[class*='pdpj'], [id*='pdpj'], "
+            "a:has-text('Entrar com PDPJ'), button:has-text('Entrar com PDPJ')"
+        ).first
+        await pdpj_btn.wait_for(state="visible", timeout=20000)
         await pdpj_btn.click()
 
         # Aguardar redirect para PDPJ SSO
