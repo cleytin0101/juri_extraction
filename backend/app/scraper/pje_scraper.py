@@ -28,6 +28,8 @@ from playwright.async_api import async_playwright, Page
 from .selectors import SELECTORS, TABLE_COLUMNS
 from .captcha_solver import solve_captcha_bytes
 from .parser import parse_numero_processo, normalize_tipo_audiencia, parse_data_audiencia, parse_pdf_text
+from .infosimples_client import fetch_processo_infosimples
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -146,25 +148,35 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
             audiencias = await _scrape_lista_pautas(page, vara_nome, data_audiencia)
             logger.info(f"Etapa 1: {len(audiencias)} audiências encontradas em {vara_nome}")
 
-            # ETAPA 2: para cada processo, acessar detalhe e resolver CAPTCHA
+            # ETAPA 2: detalhe de cada processo
+            # Se token da Infosimples estiver configurado, usa a API (sem CAPTCHA).
+            # Caso contrário, usa o scraper local com ddddocr.
+            use_infosimples = bool(settings.infosimples_token)
+            if use_infosimples:
+                logger.info("ETAPA 2: usando API Infosimples (sem CAPTCHA)")
+            else:
+                logger.info("ETAPA 2: usando scraper local com CAPTCHA (token Infosimples não configurado)")
+
             processos = []
             for aud in audiencias:
                 numero = aud.get("numero_processo", "")
                 if not numero:
                     continue
                 try:
-                    detail_page = await context.new_page()
-                    detalhe = await _scrape_detalhe_processo(detail_page, numero)
-                    await detail_page.close()
+                    if use_infosimples:
+                        detalhe = await fetch_processo_infosimples(numero, token=settings.infosimples_token)
+                        await asyncio.sleep(0.5)
+                    else:
+                        detail_page = await context.new_page()
+                        detalhe = await _scrape_detalhe_processo(detail_page, numero)
+                        await detail_page.close()
+                        await asyncio.sleep(1.5)
 
                     if detalhe:
                         processos.append({**aud, **detalhe})
                     else:
                         # Usar dados parciais da lista mesmo sem detalhe
                         processos.append(aud)
-
-                    # Pequena pausa entre requests para não sobrecarregar
-                    await asyncio.sleep(1.5)
 
                 except Exception as e:
                     logger.error(f"Erro no detalhe de {numero}: {e}")

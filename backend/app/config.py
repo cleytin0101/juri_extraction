@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # Dados do advogado para template WhatsApp
     advogado_nome: str = ""
     advogado_contato: str = ""
+    # Token da API Infosimples (substitui CAPTCHA na ETAPA 2)
+    infosimples_token: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
@@ -40,7 +42,7 @@ def load_runtime_credentials() -> None:
         return
     try:
         data = json.loads(CREDENTIALS_FILE.read_text(encoding="utf-8"))
-        for field in ("pje_cpf", "pje_senha", "advogado_nome", "advogado_contato"):
+        for field in ("pje_cpf", "pje_senha", "advogado_nome", "advogado_contato", "infosimples_token"):
             value = data.get(field, "")
             if value:
                 object.__setattr__(settings, field, value)
@@ -50,7 +52,8 @@ def load_runtime_credentials() -> None:
 
 
 def save_runtime_credentials(pje_cpf: str = "", pje_senha: str = "",
-                              advogado_nome: str = "", advogado_contato: str = "") -> None:
+                              advogado_nome: str = "", advogado_contato: str = "",
+                              infosimples_token: str = "") -> None:
     """
     Persiste as credenciais em credentials.json e atualiza settings em memória.
     Campos vazios sobrescrevem os anteriores (para permitir limpar valores).
@@ -73,6 +76,8 @@ def save_runtime_credentials(pje_cpf: str = "", pje_senha: str = "",
         updated["advogado_nome"] = advogado_nome
     if advogado_contato is not None:
         updated["advogado_contato"] = advogado_contato
+    if infosimples_token is not None:
+        updated["infosimples_token"] = infosimples_token
 
     CREDENTIALS_FILE.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
 

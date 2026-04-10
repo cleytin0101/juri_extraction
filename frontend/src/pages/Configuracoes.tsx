@@ -16,6 +16,9 @@ export function Configuracoes() {
   const [pjeSenha, setPjeSenha] = useState("");
   const [showSenha, setShowSenha] = useState(false);
   const [senhaConfigurada, setSenhaConfigurada] = useState(false);
+  const [infosimplesToken, setInfosimplesToken] = useState("");
+  const [infosimplesConfigurado, setInfosimplesConfigurado] = useState(false);
+  const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -37,6 +40,7 @@ export function Configuracoes() {
         setAdvogadoContato(data.advogado_contato);
         setPjeCpf(data.pje_cpf);
         setSenhaConfigurada(data.pje_senha_configurada);
+        setInfosimplesConfigurado(data.infosimples_token_configurado);
       })
       .catch(() => {/* silently ignore load errors */});
 
@@ -111,12 +115,15 @@ export function Configuracoes() {
         advogado_nome: advogadoNome,
         advogado_contato: advogadoContato,
         pje_cpf: pjeCpf,
-        // Only send senha if user typed something new
+        // Only send if user typed something new
         ...(pjeSenha ? { pje_senha: pjeSenha } : {}),
+        ...(infosimplesToken ? { infosimples_token: infosimplesToken } : {}),
       });
       setSaved(true);
       setSenhaConfigurada(senhaConfigurada || !!pjeSenha);
+      setInfosimplesConfigurado(infosimplesConfigurado || !!infosimplesToken);
       setPjeSenha("");
+      setInfosimplesToken("");
       setTimeout(() => setSaved(false), 4000);
     } catch {
       setError("Erro ao salvar. Verifique se o backend está rodando.");
@@ -297,6 +304,42 @@ export function Configuracoes() {
                 className="absolute right-3 top-2.5 text-gray-400 hover:text-white"
               >
                 {showSenha ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* API Infosimples */}
+        <div className="bg-surface-800 rounded-xl border border-surface-600 p-6 space-y-4">
+          <h2 className="text-white font-semibold text-sm uppercase tracking-wide text-accent-blue">
+            API Infosimples
+          </h2>
+          <p className="text-gray-500 text-xs">
+            Token da API Infosimples para consulta de processos sem CAPTCHA. Quando configurado,
+            substitui o scraper local na ETAPA 2 (detalhes do processo).
+          </p>
+
+          <div>
+            <label className="text-gray-400 text-sm block mb-1">
+              Token da API
+              {infosimplesConfigurado && !infosimplesToken && (
+                <span className="ml-2 text-accent-green text-xs font-normal">● configurado</span>
+              )}
+            </label>
+            <div className="relative">
+              <input
+                type={showToken ? "text" : "password"}
+                placeholder={infosimplesConfigurado ? "••••••• (deixe em branco para manter)" : "Cole seu token aqui"}
+                value={infosimplesToken}
+                onChange={(e) => setInfosimplesToken(e.target.value)}
+                className="w-full bg-surface-700 border border-surface-600 rounded-lg px-3 py-2 pr-10 text-white text-sm font-mono focus:outline-none focus:border-accent-blue"
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken(!showToken)}
+                className="absolute right-3 top-2.5 text-gray-400 hover:text-white"
+              >
+                {showToken ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
           </div>
