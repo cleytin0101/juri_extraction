@@ -233,52 +233,22 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                         logger.info("Login PDPJ concluído sem 2FA.")
                         return
 
-                    # Verificar se apareceu campo de TOTP
+                    # Verificar se apareceu campo de código de verificação
+                    otp_selector_found = None
                     for sel in OTP_SELECTORS:
-                        otp_field = page.locator(sel)
-                        if await otp_field.count() > 0:
-                            session.status = "aguardando_otp"
-                            session.mensagem = "Digite o código de verificação (app autenticador, SMS ou e-mail)."
-                            logger.info("PDPJ solicitou código TOTP.")
+                        if await page.locator(sel).count() > 0:
+                            otp_selector_found = sel
+                            break
 
-                            # Aguardar o usuário fornecer o código (timeout de 3 min)
-                            try:
-                                await asyncio.wait_for(session.otp_event.wait(), timeout=180)
-                            except asyncio.TimeoutError:
-                                session.status = "erro"
-                                session.mensagem = "Tempo esgotado aguardando código TOTP."
-                                return
-
-                            # Preencher código TOTP
-                            session.mensagem = "Enviando código TOTP..."
-                            await otp_field.fill(session.otp_code)
-
-                            # Submeter (Enter ou botão)
-                            submit_btn = page.locator(
-                                "button[type='submit'], "
-                                "button:has-text('CONFIRMAR'), "
-                                "button:has-text('VERIFICAR'), "
-                                "button:has-text('ENTRAR'), "
-                                "button:has-text('CONTINUAR'), "
-                                "button:has-text('ENVIAR'), "
-                                "input[type='submit']"
-                            ).first
-                            if await submit_btn.count() > 0:
-                                await submit_btn.click()
-                            else:
-                                await otp_field.press("Enter")
-
-                            # Aguardar redirect para PJe
-                            try:
-                                await page.wait_for_url("**/trt7.jus.br/**", timeout=20000)
-                                await _save_session(context)
-                                session.status = "sucesso"
-                                session.mensagem = "Conectado ao PJe com sucesso!"
-                                logger.info("Login PDPJ concluído com 2FA.")
-                            except Exception:
-                                session.status = "erro"
-                                session.mensagem = "Código inválido ou timeout após TOTP."
-                            return
+                    if otp_selector_found:
+                        logger.info("PDPJ solicitou código de verificação.")
+                        sucesso_otp = await _handle_otp(page, session, otp_selector_found)
+                        if sucesso_otp:
+                            await _save_session(context)
+                            session.status = "sucesso"
+                            session.mensagem = "Conectado ao PJe com sucesso!"
+                            logger.info("Login PDPJ concluído com 2FA.")
+                        return
 
                 # Se chegou aqui sem sucesso
                 if session.status == "iniciando":
@@ -296,6 +266,87 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
         logger.error(f"Erro ao inicializar Playwright: {e}")
         session.status = "erro"
         session.mensagem = f"Erro interno: {str(e)[:200]}"
+
+
+async def _handle_otp(page, session: LoginSession, otp_selector: str) -> bool:
+    """
+    Gerencia o fluxo de código de verificação (TOTP/SMS/e-mail) com até 3 tentativas.
+    Retorna True se o login foi concluído com sucesso, False caso contrário.
+    """
+    for tentativa in range(1, 4):
+        # Sinalizar ao frontend que está aguardando o código
+        session.status = "aguardando_otp"
+        if tentativa == 1:
+            session.mensagem = "Digite o código de verificação (app autenticador, SMS ou e-mail)."
+        else:
+            session.mensagem = f"Código incorreto ou expirado. Tente novamente ({tentativa}/3)."
+
+        # Resetar evento para nova espera
+        session.otp_event.clear()
+
+        # Aguardar o usuário fornecer o código (timeout de 3 min)
+        try:
+            await asyncio.wait_for(session.otp_event.wait(), timeout=180)
+        except asyncio.TimeoutError:
+            session.status = "erro"
+            session.mensagem = "Tempo esgotado aguardando código de verificação."
+            return False
+
+        # Re-localizar o campo OTP (evita locator stale)
+        otp_field = page.locator(otp_selector)
+        if await otp_field.count() == 0:
+            # Tentar todos os seletores novamente (campo pode ter mudado)
+            for sel in OTP_SELECTORS:
+                if await page.locator(sel).count() > 0:
+                    otp_field = page.locator(sel)
+                    break
+
+        # Preencher e submeter o código
+        session.mensagem = "Enviando código de verificação..."
+        try:
+            await otp_field.fill(session.otp_code)
+        except Exception as e:
+            logger.warning(f"Erro ao preencher campo OTP (tentativa {tentativa}): {e}")
+
+        submit_btn = page.locator(
+            "button[type='submit'], input[type='submit'], "
+            "button:has-text('CONFIRMAR'), button:has-text('Confirmar'), "
+            "button:has-text('VERIFICAR'), button:has-text('Verificar'), "
+            "button:has-text('CONTINUAR'), button:has-text('Continuar'), "
+            "button:has-text('ENVIAR'), button:has-text('Enviar'), "
+            "button:has-text('ENTRAR'), button:has-text('Entrar')"
+        ).first
+        if await submit_btn.count() > 0:
+            await submit_btn.click()
+        else:
+            await otp_field.press("Enter")
+
+        # Screenshot de diagnóstico após o submit
+        debug_path = Path(__file__).parent.parent.parent / f"debug_otp_{tentativa}.png"
+        await page.screenshot(path=str(debug_path))
+        logger.info(f"Screenshot pós-OTP (tentativa {tentativa}) salvo em {debug_path} | URL: {page.url}")
+
+        # Polling por 30s: sucesso (redirect para trt7) ou código inválido (campo ainda visível)
+        for _ in range(60):
+            await asyncio.sleep(0.5)
+
+            # Sucesso: saiu do SSO e chegou ao PJe
+            if "trt7.jus.br" in page.url and "sso.cloud.pje.jus.br" not in page.url:
+                return True
+
+            # Código inválido: campo OTP ainda visível → tentar novamente
+            if await page.locator(otp_selector).count() > 0:
+                logger.info(f"Código OTP rejeitado (tentativa {tentativa}), pedindo novo.")
+                break
+        else:
+            # 30s sem sucesso nem campo OTP visível
+            session.status = "erro"
+            session.mensagem = "Tempo esgotado aguardando redirecionamento após o código."
+            return False
+
+    session.status = "erro"
+    session.mensagem = "Número máximo de tentativas de código atingido (3/3)."
+    return False
 
 
 async def _save_session(context) -> None:
