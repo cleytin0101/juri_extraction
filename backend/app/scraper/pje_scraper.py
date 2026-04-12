@@ -25,7 +25,7 @@ from typing import List, Optional
 
 from playwright.async_api import async_playwright, Page
 
-from .selectors import SELECTORS, TABLE_COLUMNS, API_INTERCEPT_PATTERNS
+from .selectors import SELECTORS, TABLE_COLUMNS
 from .captcha_solver import solve_captcha_bytes
 from .parser import parse_numero_processo, normalize_tipo_audiencia, parse_data_audiencia, parse_pdf_text
 from .infosimples_client import fetch_processo_infosimples
@@ -221,12 +221,14 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
     api_responses: List[dict] = []
 
     async def _on_response(response):
-        for pattern in API_INTERCEPT_PATTERNS:
-            if pattern in response.url and response.status == 200:
+        # Capturar qualquer resposta JSON do domínio TRT-7
+        if "trt7.jus.br" in response.url and response.status == 200:
+            ct = response.headers.get("content-type", "")
+            if "json" in ct:
                 try:
                     body = await response.json()
                     api_responses.append({"url": response.url, "body": body})
-                    logger.info(f"XHR interceptado: {response.url}")
+                    logger.info(f"XHR capturado: {response.url}")
                 except Exception:
                     pass
 
@@ -235,28 +237,47 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
     await page.goto(f"{BASE_URL}/pautas", wait_until="networkidle", timeout=30000)
     await _screenshot(page, "debug_01_pagina_carregada.png")
 
-    # Selecionar vara no dropdown
+    # Selecionar vara — Angular Material mat-select (não é <select> nativo)
     try:
-        await page.wait_for_selector("select", timeout=8000)
-        await page.select_option("select", label=vara_nome)
-        logger.info(f"Vara selecionada: {vara_nome}")
+        orgao_locator = page.locator("mat-select, [role='combobox'], .mat-select").first
+        await orgao_locator.wait_for(state="visible", timeout=8000)
+        await orgao_locator.click()
+        await asyncio.sleep(0.5)  # aguardar animação do painel
+
+        # Aguardar opções no painel overlay
+        await page.wait_for_selector("mat-option, .mat-option", timeout=8000)
+        options = page.locator("mat-option, .mat-option")
+        count = await options.count()
+        logger.info(f"Dropdown: {count} opções disponíveis")
+
+        found = False
+        for i in range(count):
+            txt = (await options.nth(i).inner_text()).strip()
+            if vara_nome.lower() in txt.lower() or txt.lower() in vara_nome.lower():
+                await options.nth(i).click()
+                found = True
+                logger.info(f"Vara selecionada: '{txt}'")
+                break
+
+        if not found:
+            primeiras = [((await options.nth(i).inner_text()).strip()) for i in range(min(count, 5))]
+            logger.warning(f"Vara '{vara_nome}' não encontrada. Primeiras opções: {primeiras}")
+            await _screenshot(page, "debug_02_vara_erro.png")
+            return []
+
         await _screenshot(page, "debug_02_vara_selecionada.png")
     except Exception as e:
         logger.warning(f"Erro ao selecionar vara '{vara_nome}': {e}")
         await _screenshot(page, "debug_02_vara_erro.png")
         return []
 
-    # Preencher data — detecta tipo do input para escolher formato correto
-    data_iso = data_audiencia.strftime("%Y-%m-%d")  # "2026-04-14" para input[type=date]
-    data_br  = data_audiencia.strftime("%d/%m/%Y")  # "14/04/2026" para input texto
+    # Preencher data — input[type="date"] com formato ISO (Angular Material datepicker)
     try:
-        date_input = page.locator(SELECTORS["data_input"]).first
+        date_input = page.locator("input[type='date'], input[matdatepickerinput]").first
         await date_input.wait_for(state="visible", timeout=5000)
-        input_type = await date_input.get_attribute("type") or ""
-        fill_value = data_iso if input_type == "date" else data_br
-        await date_input.fill(fill_value)
+        await date_input.fill(data_audiencia.strftime("%Y-%m-%d"))
         await page.keyboard.press("Tab")
-        logger.info(f"Data preenchida: '{fill_value}' (input type='{input_type}')")
+        logger.info(f"Data preenchida: {data_audiencia.strftime('%Y-%m-%d')}")
         await _screenshot(page, "debug_03_data_preenchida.png")
     except Exception as e:
         logger.warning(f"Erro ao preencher data: {e}")
