@@ -26,5 +26,6 @@ export interface ExtrairJobStatus {
   status: "running" | "done" | "error";
   processos_encontrados: number;
   leads_criados: number;
+  processos_com_advogado: number;
   errors: string[];
 }

@@ -107,6 +107,11 @@ export function Dashboard() {
                         <span>
                           <span className="text-white font-medium">{job.leads_criados}</span> leads
                         </span>
+                        {job.processos_com_advogado > 0 && (
+                          <span className="text-red-400">
+                            <span className="font-medium">{job.processos_com_advogado}</span> c/ adv.
+                          </span>
+                        )}
                         {job.errors.length > 0 && (
                           <span className="text-accent-yellow">{job.errors.length} erro(s)</span>
                         )}

@@ -2,6 +2,7 @@ export type LeadStatus = "novo" | "enviado" | "respondido" | "convertido" | "des
 
 export interface Lead {
   lead_id: string;
+  processo_id: string;
   status: LeadStatus;
   mensagem_texto: string | null;
   enviado_em: string | null;
@@ -17,6 +18,9 @@ export interface Lead {
   tipo_audiencia: string | null;
   resumo_caso: string | null;
   reclamante_nome: string | null;
+  tem_advogado: boolean;
+  pdf_url: string | null;
+  pdf_expires_at: string | null;
   empresa_nome: string;
   empresa_cnpj: string | null;
   empresa_telefones: string[] | null;

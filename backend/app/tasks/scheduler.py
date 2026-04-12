@@ -5,6 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from ..database import get_supabase
 from ..services.extraction_service import run_extraction
+from ..services.storage_service import cleanup_expired_pdfs
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,17 @@ async def daily_scrape():
             logger.info(
                 f"Vara {vara['codigo']}: "
                 f"{result['processos_encontrados']} processos, "
-                f"{result['leads_criados']} leads"
+                f"{result['leads_criados']} leads, "
+                f"{result.get('processos_com_advogado', 0)} com advogado"
             )
         except Exception as e:
             logger.error(f"Erro na vara {vara['codigo']}: {e}")
+
+
+@scheduler.scheduled_job("cron", hour=3, minute=0)
+async def cleanup_pdfs_job():
+    """Job diário às 03h: remove PDFs expirados do Supabase Storage."""
+    logger.info("Iniciando limpeza de PDFs expirados...")
+    sb = get_supabase()
+    deletados = await cleanup_expired_pdfs(sb)
+    logger.info(f"Limpeza concluída: {deletados} PDFs removidos.")

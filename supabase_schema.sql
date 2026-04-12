@@ -40,6 +40,9 @@ CREATE TABLE processos (
   tipo_audiencia   audiencia_tipo DEFAULT 'outra',
   resumo_caso      TEXT,
   reclamante_nome  TEXT,
+  tem_advogado     BOOLEAN DEFAULT FALSE,
+  pdf_url          TEXT,
+  pdf_expires_at   TIMESTAMPTZ,
   raw_data         JSONB,
   created_at       TIMESTAMPTZ DEFAULT now()
 );
@@ -107,6 +110,23 @@ CREATE TRIGGER leads_updated_at
   BEFORE UPDATE ON leads
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- Histórico persistente de extrações
+CREATE TABLE extracoes (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vara_id                 UUID REFERENCES varas(id) ON DELETE SET NULL,
+  data_pauta              DATE NOT NULL,
+  status                  TEXT DEFAULT 'processando',
+  processos_encontrados   INT DEFAULT 0,
+  leads_criados           INT DEFAULT 0,
+  processos_com_advogado  INT DEFAULT 0,
+  errors                  JSONB DEFAULT '[]',
+  created_at              TIMESTAMPTZ DEFAULT now(),
+  finished_at             TIMESTAMPTZ
+);
+
+CREATE INDEX idx_extracoes_created_at ON extracoes(created_at DESC);
+CREATE INDEX idx_extracoes_data_pauta ON extracoes(data_pauta);
+
 -- View desnormalizada para o dashboard
 CREATE VIEW leads_completo AS
 SELECT
@@ -119,6 +139,7 @@ SELECT
   l.created_at          AS lead_criado_em,
   l.updated_at,
   l.notas,
+  p.id                  AS processo_id,
   p.numero_processo,
   p.orgao_julgador,
   p.valor_causa,
@@ -126,6 +147,9 @@ SELECT
   p.tipo_audiencia,
   p.resumo_caso,
   p.reclamante_nome,
+  p.tem_advogado,
+  p.pdf_url,
+  p.pdf_expires_at,
   e.nome                AS empresa_nome,
   e.cnpj                AS empresa_cnpj,
   e.telefones           AS empresa_telefones,

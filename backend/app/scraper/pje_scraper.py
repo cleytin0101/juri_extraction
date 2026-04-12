@@ -176,6 +176,9 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
                 try:
                     if use_infosimples:
                         detalhe = await fetch_processo_infosimples(numero, token=settings.infosimples_token)
+                        # Infosimples não fornece PDF — pdf_bytes fica None
+                        if detalhe:
+                            detalhe["pdf_bytes"] = None
                         await asyncio.sleep(0.5)
                     else:
                         detail_page = await context.new_page()
@@ -186,7 +189,6 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
                     if detalhe:
                         processos.append({**aud, **detalhe})
                     else:
-                        # Usar dados parciais da lista mesmo sem detalhe
                         processos.append(aud)
 
                 except Exception as e:
@@ -334,10 +336,11 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
         # Sem CAPTCHA — página carregou direto
         html_data = await _extract_partes(page)
         pdf_bytes = await _download_processo_pdf(page, numero)
+        html_data["pdf_bytes"] = pdf_bytes
         if pdf_bytes:
             pdf_data = parse_pdf_text(pdf_bytes)
-            for key in ("reclamante_nome", "empresa_nome", "empresa_cnpj", "valor_causa", "resumo_caso"):
-                if pdf_data.get(key):
+            for key in ("reclamante_nome", "empresa_nome", "empresa_cnpj", "valor_causa", "resumo_caso", "tem_advogado"):
+                if pdf_data.get(key) is not None and pdf_data.get(key) != "":
                     html_data[key] = pdf_data[key]
         return html_data
 
@@ -375,11 +378,11 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
 
             # Tentar baixar o PDF completo e enriquecer com dados dele
             pdf_bytes = await _download_processo_pdf(page, numero)
+            html_data["pdf_bytes"] = pdf_bytes  # armazenar para upload posterior
             if pdf_bytes:
                 pdf_data = parse_pdf_text(pdf_bytes)
-                # Campos do PDF têm prioridade sobre regex do HTML
-                for key in ("reclamante_nome", "empresa_nome", "empresa_cnpj", "valor_causa", "resumo_caso"):
-                    if pdf_data.get(key):
+                for key in ("reclamante_nome", "empresa_nome", "empresa_cnpj", "valor_causa", "resumo_caso", "tem_advogado"):
+                    if pdf_data.get(key) is not None and pdf_data.get(key) != "":
                         html_data[key] = pdf_data[key]
 
             return html_data

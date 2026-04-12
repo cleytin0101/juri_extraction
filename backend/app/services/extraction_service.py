@@ -7,6 +7,7 @@ from ..config import settings
 from ..database import get_supabase
 from ..scraper.pje_scraper import scrape_pauta
 from ..scraper.enricher import enrich_empresa
+from .storage_service import upload_pdf, pdf_expires_at
 
 logger = logging.getLogger(__name__)
 
@@ -44,24 +45,32 @@ async def run_extraction(vara_id: str, data_audiencia: date) -> dict:
     processos_encontrados = len(processos_raw)
     logger.info(f"{processos_encontrados} processos encontrados")
 
+    leads_criados = 0
+    processos_com_advogado = 0
+
     # Processar cada processo
     for proc_data in processos_raw:
         try:
-            lead_created = await _process_single(sb, pauta_id, proc_data)
-            if lead_created:
+            result = await _process_single(sb, pauta_id, proc_data)
+            if result == "lead_criado":
                 leads_criados += 1
+            elif result == "tem_advogado":
+                processos_com_advogado += 1
         except Exception as e:
             num = proc_data.get("numero_processo", "?")
             errors.append(f"Erro no processo {num}: {e}")
             logger.error(f"Erro ao processar {num}: {e}")
 
-        # Rate limiting entre processos
         await asyncio.sleep(0.5)
 
-    logger.info(f"Extração concluída: {leads_criados} leads criados, {len(errors)} erros")
+    logger.info(
+        f"Extração concluída: {leads_criados} leads, "
+        f"{processos_com_advogado} com advogado, {len(errors)} erros"
+    )
     return {
         "processos_encontrados": processos_encontrados,
         "leads_criados": leads_criados,
+        "processos_com_advogado": processos_com_advogado,
         "errors": errors,
     }
 
@@ -78,16 +87,31 @@ def _upsert_pauta(sb, vara_id: str, data_audiencia: date) -> str:
     return result.data[0]["id"]
 
 
-async def _process_single(sb, pauta_id: str, proc_data: dict) -> bool:
+async def _process_single(sb, pauta_id: str, proc_data: dict) -> str:
+    """
+    Processa um processo individual.
+    Retorna: 'lead_criado', 'tem_advogado', 'duplicado' ou 'ignorado'.
+    """
     numero = proc_data.get("numero_processo", "")
     if not numero:
-        return False
+        return "ignorado"
 
     data_aud = proc_data.get("data_audiencia")
     if data_aud is None:
-        return False
+        return "ignorado"
 
-    # Upsert processo (sem duplicar por numero_processo)
+    tem_advogado = bool(proc_data.get("tem_advogado", False))
+
+    # Upload do PDF ao Supabase Storage (se disponível)
+    pdf_bytes = proc_data.get("pdf_bytes")
+    pdf_path = None
+    pdf_exp = None
+    if pdf_bytes:
+        pdf_path = await upload_pdf(sb, numero, pdf_bytes)
+        if pdf_path:
+            pdf_exp = pdf_expires_at()
+
+    # Upsert processo
     processo_row = {
         "pauta_id": pauta_id,
         "numero_processo": numero,
@@ -97,6 +121,9 @@ async def _process_single(sb, pauta_id: str, proc_data: dict) -> bool:
         "tipo_audiencia": proc_data.get("tipo_audiencia", "outra"),
         "resumo_caso": proc_data.get("resumo_caso"),
         "reclamante_nome": proc_data.get("reclamante_nome"),
+        "tem_advogado": tem_advogado,
+        "pdf_url": pdf_path,
+        "pdf_expires_at": pdf_exp,
         "raw_data": proc_data.get("raw_data"),
     }
 
@@ -107,7 +134,12 @@ async def _process_single(sb, pauta_id: str, proc_data: dict) -> bool:
     )
     processo_id = proc_result.data[0]["id"]
 
-    # Verificar se lead já existe para evitar duplicata
+    # Se já tem advogado, não cria lead (mas processo fica salvo)
+    if tem_advogado:
+        logger.info(f"Processo {numero}: já tem advogado — lead não criado.")
+        return "tem_advogado"
+
+    # Verificar se lead já existe
     existing = (
         sb.table("leads")
         .select("id")
@@ -115,9 +147,9 @@ async def _process_single(sb, pauta_id: str, proc_data: dict) -> bool:
         .execute()
     )
     if existing.data:
-        return False  # Lead já existe
+        return "duplicado"
 
-    # Enriquecer empresa via CNPJ.ws
+    # Enriquecer empresa via API de CNPJ
     cnpj = proc_data.get("empresa_cnpj", "")
     enrichment = await enrich_empresa(cnpj) if cnpj else {}
 
@@ -141,11 +173,10 @@ async def _process_single(sb, pauta_id: str, proc_data: dict) -> bool:
     empresa_result = sb.table("empresas").insert(empresa_row).execute()
     empresa_id = empresa_result.data[0]["id"]
 
-    # Criar lead com status 'novo'
     sb.table("leads").insert({
         "processo_id": processo_id,
         "empresa_id": empresa_id,
         "status": "novo",
     }).execute()
 
-    return True
+    return "lead_criado"

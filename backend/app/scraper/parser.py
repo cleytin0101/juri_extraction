@@ -135,10 +135,27 @@ def _is_reclamado(parte: dict) -> bool:
     return "reclamado" in polo or "passivo" in polo or "reu" in polo
 
 
+ADVOGADO_PATTERNS = re.compile(
+    r"habilita[çc][aã]o|contesta[çc][aã]o|peticao\s+de\s+habilita|peti[çc][aã]o\s+de\s+habilita",
+    re.IGNORECASE,
+)
+
+
+def check_tem_advogado(text: str) -> bool:
+    """
+    Verifica se o texto do PDF contém sinais de que a empresa já tem advogado:
+    - Petição de habilitação (advogado se habilitando para defender a empresa)
+    - Contestação (defesa já apresentada)
+    Retorna True se encontrar algum desses indicadores.
+    """
+    return bool(ADVOGADO_PATTERNS.search(text))
+
+
 def parse_pdf_text(pdf_bytes: bytes) -> dict:
     """
     Extrai campos estruturados do PDF completo do processo (baixado via 'Baixar processo na íntegra').
-    Retorna dict com: reclamante_nome, empresa_nome, empresa_cnpj, valor_causa, resumo_caso.
+    Retorna dict com: reclamante_nome, empresa_nome, empresa_cnpj, valor_causa, resumo_caso,
+    tem_advogado.
     Campos não encontrados ficam como None/"".
     """
     result: dict = {
@@ -147,6 +164,7 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
         "empresa_cnpj": None,
         "valor_causa": None,
         "resumo_caso": "",
+        "tem_advogado": False,
     }
     try:
         import pdfplumber
@@ -201,5 +219,8 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
     )
     if resumo_m:
         result["resumo_caso"] = resumo_m.group(1).strip()[:500]
+
+    # Verificar se empresa já tem advogado
+    result["tem_advogado"] = check_tem_advogado(full_text)
 
     return result
