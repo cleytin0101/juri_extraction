@@ -22,6 +22,7 @@ export interface ExtrairResponse {
 export interface ExtrairJobStatus {
   key: string;
   vara_id: string;
+  vara_nome: string;
   data: string;
   status: "running" | "done" | "error";
   processos_encontrados: number;

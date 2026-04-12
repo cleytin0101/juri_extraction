@@ -5,6 +5,7 @@ from typing import List
 from fastapi import APIRouter, BackgroundTasks
 from ..models.pauta import ExtrairRequest, ExtrairResponse, ExtrairJobStatus
 from ..services.extraction_service import run_extraction
+from ..database import get_supabase
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/extrair", tags=["extrair"])
@@ -22,16 +23,28 @@ async def extrair_pauta(req: ExtrairRequest, background_tasks: BackgroundTasks):
     """
     keys: List[str] = []
 
+    sb = get_supabase()
+
     for vara_id in req.vara_ids:
         for data in req.datas:
             key = f"{vara_id}_{data.isoformat()}"
+
+            # Resolver nome da vara para exibição no dashboard
+            try:
+                vara_result = sb.table("varas").select("nome").eq("id", vara_id).single().execute()
+                vara_nome = vara_result.data["nome"] if vara_result.data else vara_id
+            except Exception:
+                vara_nome = vara_id
+
             _jobs[key] = {
                 "key": key,
                 "vara_id": vara_id,
+                "vara_nome": vara_nome,
                 "data": data.isoformat(),
                 "status": "running",
                 "processos_encontrados": 0,
                 "leads_criados": 0,
+                "processos_com_advogado": 0,
                 "errors": [],
                 "started_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -50,6 +63,7 @@ async def extrair_pauta(req: ExtrairRequest, background_tasks: BackgroundTasks):
                         "status": "done",
                         "processos_encontrados": result.get("processos_encontrados", 0),
                         "leads_criados": result.get("leads_criados", 0),
+                        "processos_com_advogado": result.get("processos_com_advogado", 0),
                         "errors": result.get("errors", []),
                         "finished_at": datetime.now(timezone.utc).isoformat(),
                     }
@@ -82,10 +96,12 @@ def get_status():
         ExtrairJobStatus(
             key=j["key"],
             vara_id=j["vara_id"],
+            vara_nome=j.get("vara_nome", j["vara_id"]),
             data=j["data"],
             status=j["status"],
             processos_encontrados=j.get("processos_encontrados", 0),
             leads_criados=j.get("leads_criados", 0),
+            processos_com_advogado=j.get("processos_com_advogado", 0),
             errors=j.get("errors", []),
         )
         for j in jobs[:20]

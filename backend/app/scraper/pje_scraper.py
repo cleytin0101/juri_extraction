@@ -150,7 +150,13 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
                 logger.info("Usando sessão autenticada existente.")
             elif cpf and senha:
                 login_ok = await _login_pdpj(page, cpf, senha)
-                if not login_ok:
+                if login_ok:
+                    try:
+                        await context.storage_state(path=str(SESSION_FILE))
+                        logger.info("Sessão PJe salva em disco após login bem-sucedido")
+                    except Exception as se:
+                        logger.warning(f"Não foi possível salvar sessão: {se}")
+                else:
                     logger.warning("Login falhou — tentando acessar pautas sem autenticação")
             else:
                 logger.info("Sem credenciais e sem sessão — acessando pautas como consulta pública")
@@ -220,23 +226,39 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
         logger.warning(f"Erro ao selecionar vara '{vara_nome}': {e}")
         return []
 
-    # Preencher data
-    data_str = data_audiencia.strftime("%d/%m/%Y")
+    # Preencher data — detecta tipo do input para escolher formato correto
+    data_iso = data_audiencia.strftime("%Y-%m-%d")  # "2026-04-14" para input[type=date]
+    data_br  = data_audiencia.strftime("%d/%m/%Y")  # "14/04/2026" para input texto
     try:
-        # O PJe usa input de data com formato brasileiro
-        data_input = page.locator("input").nth(0)
-        await data_input.fill(data_str)
+        date_input = page.locator(SELECTORS["data_input"]).first
+        await date_input.wait_for(state="visible", timeout=5000)
+        input_type = await date_input.get_attribute("type") or ""
+        fill_value = data_iso if input_type == "date" else data_br
+        await date_input.fill(fill_value)
         await page.keyboard.press("Tab")
+        logger.info(f"Data preenchida: '{fill_value}' (input type='{input_type}')")
     except Exception as e:
         logger.warning(f"Erro ao preencher data: {e}")
 
     # Clicar em PESQUISAR
     try:
-        await page.get_by_text("PESQUISAR").click()
+        btn = page.locator(SELECTORS["btn_pesquisar"]).first
+        await btn.wait_for(state="visible", timeout=5000)
+        await btn.click()
         await page.wait_for_load_state("networkidle", timeout=15000)
-        await asyncio.sleep(2)
+        # Aguardar linhas da tabela aparecerem (Angular pode demorar para renderizar)
+        try:
+            await page.wait_for_selector("table tbody tr", timeout=8000)
+        except Exception:
+            pass  # Pode não ter resultados — não é erro
+        await asyncio.sleep(1)
     except Exception as e:
         logger.warning(f"Erro ao clicar em pesquisar: {e}")
+        try:
+            await page.screenshot(path="debug_pautas_pesquisar.png")
+            logger.info("Screenshot de diagnóstico salvo: debug_pautas_pesquisar.png")
+        except Exception:
+            pass
         return []
 
     # Extrair dados da tabela

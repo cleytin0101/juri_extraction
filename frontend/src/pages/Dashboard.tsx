@@ -91,7 +91,7 @@ export function Dashboard() {
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <JobStatusIcon status={job.status} />
-                    <span className="text-gray-200 truncate">{job.vara_id}</span>
+                    <span className="text-gray-200 truncate">{job.vara_nome || job.vara_id}</span>
                     <span className="text-gray-500 shrink-0">{job.data}</span>
                   </div>
                   <div className="flex items-center gap-4 shrink-0 ml-4 text-xs text-gray-400">

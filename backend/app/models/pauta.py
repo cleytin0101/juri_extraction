@@ -17,10 +17,12 @@ class ExtrairRequest(BaseModel):
 class ExtrairJobStatus(BaseModel):
     key: str
     vara_id: str
+    vara_nome: str = ""
     data: date
     status: str  # "running" | "done" | "error"
     processos_encontrados: int = 0
     leads_criados: int = 0
+    processos_com_advogado: int = 0
     errors: List[str] = []
 
 
