@@ -6,7 +6,7 @@ from .config import settings, load_runtime_credentials
 from .tasks.scheduler import scheduler
 from .database import get_supabase, seed_varas_if_empty
 from .routers import pautas, extrair, leads, mensagem, metrics, configuracoes
-from .routers import auth
+from .routers import auth, debug
 
 
 @asynccontextmanager
@@ -40,6 +40,7 @@ app.include_router(mensagem.router)
 app.include_router(metrics.router)
 app.include_router(configuracoes.router)
 app.include_router(auth.router)
+app.include_router(debug.router)
 
 
 @app.get("/health")

@@ -60,3 +60,14 @@ API_PATTERNS = [
     "/consultaprocessual/pauta",
     "/pautas",
 ]
+
+# Padrões para interceptação de respostas XHR no Playwright
+# Usados para capturar a resposta JSON do Angular antes de ler HTML
+API_INTERCEPT_PATTERNS = [
+    "/pje-consulta-api/",
+    "/api/pauta",
+    "/pauta",
+    "/audiencia",
+    "/consultaprocessual/api",
+    "/seam/resource/",
+]

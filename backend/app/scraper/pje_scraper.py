@@ -25,7 +25,7 @@ from typing import List, Optional
 
 from playwright.async_api import async_playwright, Page
 
-from .selectors import SELECTORS, TABLE_COLUMNS
+from .selectors import SELECTORS, TABLE_COLUMNS, API_INTERCEPT_PATTERNS
 from .captcha_solver import solve_captcha_bytes
 from .parser import parse_numero_processo, normalize_tipo_audiencia, parse_data_audiencia, parse_pdf_text
 from .infosimples_client import fetch_processo_infosimples
@@ -212,18 +212,38 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
 
 async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date) -> List[dict]:
     """
-    ETAPA 1: Acessa a lista pública de pautas e extrai os processos da tabela.
-    Não requer CAPTCHA.
+    ETAPA 1: Acessa a lista pública de pautas e extrai os processos.
+    Estratégia primária: interceptar resposta XHR do Angular.
+    Fallback: ler tabela HTML.
+    Diagnóstico: screenshots + HTML dump em cada etapa.
     """
+    # Registrar listener XHR antes de qualquer navegação
+    api_responses: List[dict] = []
+
+    async def _on_response(response):
+        for pattern in API_INTERCEPT_PATTERNS:
+            if pattern in response.url and response.status == 200:
+                try:
+                    body = await response.json()
+                    api_responses.append({"url": response.url, "body": body})
+                    logger.info(f"XHR interceptado: {response.url}")
+                except Exception:
+                    pass
+
+    page.on("response", _on_response)
+
     await page.goto(f"{BASE_URL}/pautas", wait_until="networkidle", timeout=30000)
+    await _screenshot(page, "debug_01_pagina_carregada.png")
 
     # Selecionar vara no dropdown
     try:
         await page.wait_for_selector("select", timeout=8000)
         await page.select_option("select", label=vara_nome)
         logger.info(f"Vara selecionada: {vara_nome}")
+        await _screenshot(page, "debug_02_vara_selecionada.png")
     except Exception as e:
         logger.warning(f"Erro ao selecionar vara '{vara_nome}': {e}")
+        await _screenshot(page, "debug_02_vara_erro.png")
         return []
 
     # Preencher data — detecta tipo do input para escolher formato correto
@@ -237,8 +257,10 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
         await date_input.fill(fill_value)
         await page.keyboard.press("Tab")
         logger.info(f"Data preenchida: '{fill_value}' (input type='{input_type}')")
+        await _screenshot(page, "debug_03_data_preenchida.png")
     except Exception as e:
         logger.warning(f"Erro ao preencher data: {e}")
+        await _screenshot(page, "debug_03_data_erro.png")
 
     # Clicar em PESQUISAR
     try:
@@ -246,23 +268,123 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
         await btn.wait_for(state="visible", timeout=5000)
         await btn.click()
         await page.wait_for_load_state("networkidle", timeout=15000)
-        # Aguardar linhas da tabela aparecerem (Angular pode demorar para renderizar)
         try:
             await page.wait_for_selector("table tbody tr", timeout=8000)
         except Exception:
-            pass  # Pode não ter resultados — não é erro
-        await asyncio.sleep(1)
+            pass  # Pode não ter resultados
+        await asyncio.sleep(1.5)
+        await _screenshot(page, "debug_04_apos_pesquisar.png")
     except Exception as e:
         logger.warning(f"Erro ao clicar em pesquisar: {e}")
-        try:
-            await page.screenshot(path="debug_pautas_pesquisar.png")
-            logger.info("Screenshot de diagnóstico salvo: debug_pautas_pesquisar.png")
-        except Exception:
-            pass
+        await _screenshot(page, "debug_04_pesquisar_erro.png")
         return []
 
-    # Extrair dados da tabela
-    return await _parse_tabela_pautas(page, vara_nome, data_audiencia)
+    # Tentar usar dados XHR capturados primeiro (mais confiável que HTML)
+    if api_responses:
+        logger.info(f"Tentando parsear {len(api_responses)} resposta(s) XHR...")
+        audiencias = _parse_xhr_responses(api_responses, vara_nome, data_audiencia)
+        if audiencias:
+            logger.info(f"XHR: {len(audiencias)} audiências extraídas")
+            return audiencias
+
+    # Fallback: ler tabela HTML
+    audiencias = await _parse_tabela_pautas(page, vara_nome, data_audiencia)
+
+    # Se ainda 0, dumpar HTML + logs para diagnóstico
+    if not audiencias:
+        logger.warning(f"0 audiências encontradas para {vara_nome} / {data_audiencia}")
+        logger.warning(f"URLs XHR capturadas: {[r['url'] for r in api_responses]}")
+        try:
+            html = await page.content()
+            with open("debug_html_sem_resultados.html", "w", encoding="utf-8") as f:
+                f.write(html)
+            logger.warning("HTML da página salvo: debug_html_sem_resultados.html")
+        except Exception:
+            pass
+
+    return audiencias
+
+
+async def _screenshot(page: Page, path: str) -> None:
+    """Salva screenshot silenciosamente (falha não interrompe o fluxo)."""
+    try:
+        await page.screenshot(path=path, full_page=False)
+    except Exception:
+        pass
+
+
+def _parse_xhr_responses(responses: List[dict], vara_nome: str, data_audiencia: date) -> List[dict]:
+    """
+    Tenta extrair audiências de respostas XHR capturadas.
+    Loga o JSON para diagnóstico e tenta campos comuns de paginação Angular.
+    """
+    for r in responses:
+        body = r["body"]
+        logger.info(f"XHR [{r['url']}] amostra: {str(body)[:300]}")
+
+        items = None
+        if isinstance(body, list):
+            items = body
+        elif isinstance(body, dict):
+            for key in ("data", "items", "audiencias", "content", "list", "result", "rows", "pautas"):
+                if isinstance(body.get(key), list):
+                    items = body[key]
+                    logger.info(f"XHR: lista encontrada em body['{key}'] com {len(items)} items")
+                    break
+
+        if items:
+            return _map_xhr_items(items, vara_nome, data_audiencia)
+
+    return []
+
+
+def _map_xhr_items(items: list, vara_nome: str, data_audiencia: date) -> List[dict]:
+    """
+    Mapeia items do JSON XHR para o formato interno de audiência.
+    Tenta campos comuns que o PJe costuma usar.
+    """
+    audiencias = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        # Número do processo — vários nomes possíveis
+        numero = (
+            item.get("numeroProcesso")
+            or item.get("numero_processo")
+            or item.get("processo")
+            or item.get("numProcesso")
+            or ""
+        )
+        numero = parse_numero_processo(str(numero)) if numero else ""
+        if not numero:
+            continue
+
+        horario = str(item.get("horario") or item.get("hora") or item.get("horaAudiencia") or "")
+        tipo_raw = str(item.get("tipo") or item.get("tipoAudiencia") or item.get("tipo_audiencia") or "")
+        sala = str(item.get("sala") or item.get("local") or "")
+        situacao = str(item.get("situacao") or item.get("status") or "")
+
+        data_hora_str = f"{data_audiencia.strftime('%d/%m/%Y')} {horario}"
+        data_hora = parse_data_audiencia(data_hora_str)
+
+        audiencias.append({
+            "numero_processo": numero,
+            "orgao_julgador": vara_nome,
+            "data_audiencia": data_hora or data_audiencia,
+            "tipo_audiencia": normalize_tipo_audiencia(tipo_raw),
+            "sala": sala,
+            "situacao": situacao,
+            "horario": horario,
+            "reclamante_nome": str(item.get("reclamante") or item.get("reclamanteNome") or ""),
+            "empresa_nome": str(item.get("reclamado") or item.get("reclamadoNome") or ""),
+            "empresa_cnpj": None,
+            "valor_causa": None,
+            "resumo_caso": "",
+            "raw_data": item,
+        })
+
+    return audiencias
 
 
 async def _parse_tabela_pautas(page: Page, vara_nome: str, data_audiencia: date) -> List[dict]:
