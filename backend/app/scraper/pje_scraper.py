@@ -188,7 +188,10 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
                         await asyncio.sleep(0.5)
                     else:
                         detail_page = await context.new_page()
-                        detalhe = await _scrape_detalhe_processo(detail_page, numero)
+                        detalhe = await _scrape_detalhe_processo(
+                            detail_page, numero,
+                            url_override=aud.get("detalhe_href", ""),
+                        )
                         await detail_page.close()
                         await asyncio.sleep(1.5)
 
@@ -341,7 +344,7 @@ def _parse_xhr_responses(responses: List[dict], vara_nome: str, data_audiencia: 
     """
     for r in responses:
         body = r["body"]
-        logger.info(f"XHR [{r['url']}] amostra: {str(body)[:300]}")
+        logger.warning(f"XHR [{r['url']}] amostra: {str(body)[:400]}")
 
         items = None
         if isinstance(body, list):
@@ -431,13 +434,19 @@ async def _parse_tabela_pautas(page: Page, vara_nome: str, data_audiencia: date)
                 processo_cell = cells.nth(TABLE_COLUMNS["processo"])
                 processo_text = (await processo_cell.inner_text()).strip()
 
-                # Extrair número do processo (pode estar em link ou texto)
+                # Extrair número do processo + capturar href real do link
                 numero = parse_numero_processo(processo_text)
-                if not numero:
-                    # Tentar pegar do href do link
-                    link = processo_cell.locator("a").first
-                    href = await link.get_attribute("href") if await link.count() > 0 else ""
-                    numero = parse_numero_processo(href or "")
+                link = processo_cell.locator("a").first
+                detalhe_href = ""
+                if await link.count() > 0:
+                    href_raw = await link.get_attribute("href") or ""
+                    if not numero:
+                        numero = parse_numero_processo(href_raw)
+                    if href_raw.startswith("http"):
+                        detalhe_href = href_raw
+                    elif href_raw.startswith("/"):
+                        detalhe_href = f"https://pje.trt7.jus.br{href_raw}"
+                    logger.warning(f"Linha {i}: processo='{processo_text}' href='{href_raw}'")
 
                 if not numero:
                     logger.debug(f"Linha {i}: número de processo não encontrado em '{processo_text}'")
@@ -458,6 +467,7 @@ async def _parse_tabela_pautas(page: Page, vara_nome: str, data_audiencia: date)
                     "sala": sala,
                     "situacao": situacao,
                     "horario": horario,
+                    "detalhe_href": detalhe_href,
                     # Campos a preencher na etapa 2
                     "reclamante_nome": "",
                     "empresa_nome": "",
@@ -480,14 +490,14 @@ async def _parse_tabela_pautas(page: Page, vara_nome: str, data_audiencia: date)
     return audiencias
 
 
-async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
+async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = "") -> Optional[dict]:
     """
     ETAPA 2: Acessa a página de detalhe do processo.
     Resolve o CAPTCHA automaticamente com ddddocr e extrai partes.
+    url_override: se fornecido, usa este URL em vez de construir a partir do número.
     """
-    # Montar URL de detalhe — formato confirmado pelas imagens
-    # Ex: /captcha/detalhe-processo/0000181-55.2026.5.07.0006/1
-    url = f"{BASE_URL}/captcha/detalhe-processo/{numero}/1"
+    url = url_override if url_override else f"{BASE_URL}/captcha/detalhe-processo/{numero}/1"
+    logger.warning(f"Detalhe {numero}: acessando URL={url}")
 
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=20000)
@@ -497,7 +507,7 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
 
     await _screenshot(page, "debug_05_detalhe_carregado.png")
     page_title = await page.title()
-    logger.info(f"Detalhe {numero}: URL={page.url} | título='{page_title}'")
+    logger.warning(f"Detalhe {numero}: URL_atual={page.url} | título='{page_title}'")
 
     # Verificar se tem CAPTCHA
     captcha_img = page.locator(SELECTORS["captcha_img"])
@@ -507,6 +517,15 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
 
     if captcha_count == 0:
         # Sem CAPTCHA — página carregou direto
+        await _screenshot(page, "debug_06_detalhe_sem_captcha.png")
+        try:
+            suffix = numero[-10:].replace(".", "").replace("-", "")
+            html_content = await page.content()
+            with open(f"debug_detalhe_{suffix}.html", "w", encoding="utf-8") as f:
+                f.write(html_content)
+            logger.warning(f"Detalhe {numero}: HTML salvo em debug_detalhe_{suffix}.html ({len(html_content)} chars)")
+        except Exception:
+            pass
         html_data = await _extract_partes(page)
         pdf_bytes = await _download_processo_pdf(page, numero)
         html_data["pdf_bytes"] = pdf_bytes
