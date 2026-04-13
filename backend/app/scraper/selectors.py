@@ -23,7 +23,13 @@ SELECTORS = {
 
     # --- Página de CAPTCHA ---
     # Imagem do CAPTCHA
-    "captcha_img": "img[src*='captcha'], img[alt*='captcha'], img[alt*='CAPTCHA']",
+    "captcha_img": (
+        "img[src*='captcha'], img[src*='Captcha'], img[src*='CAPTCHA'], "
+        "img[alt*='captcha'], img[alt*='CAPTCHA'], "
+        "img[src*='imagem'], img[src*='image'], img[src*='code'], "
+        "img[src*='security'], img[src*='verificacao'], img[src*='verify'], "
+        "form img"
+    ),
 
     # Campo de resposta do CAPTCHA
     "captcha_input": "input[placeholder*='Resposta'], input[id*='resposta'], input[name*='captcha'], input[id*='captcha']",

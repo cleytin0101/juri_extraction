@@ -495,9 +495,17 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
         logger.warning(f"Erro ao acessar detalhe de {numero}: {e}")
         return None
 
+    await _screenshot(page, "debug_05_detalhe_carregado.png")
+    page_title = await page.title()
+    logger.info(f"Detalhe {numero}: URL={page.url} | título='{page_title}'")
+
     # Verificar se tem CAPTCHA
     captcha_img = page.locator(SELECTORS["captcha_img"])
-    if await captcha_img.count() == 0:
+    captcha_count = await captcha_img.count()
+    todas_imgs = await page.locator("img").count()
+    logger.info(f"Detalhe {numero}: captcha_img encontrado={captcha_count > 0} | total <img>={todas_imgs}")
+
+    if captcha_count == 0:
         # Sem CAPTCHA — página carregou direto
         html_data = await _extract_partes(page)
         pdf_bytes = await _download_processo_pdf(page, numero)
@@ -507,12 +515,31 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
             for key in ("reclamante_nome", "empresa_nome", "empresa_cnpj", "valor_causa", "resumo_caso", "tem_advogado"):
                 if pdf_data.get(key) is not None and pdf_data.get(key) != "":
                     html_data[key] = pdf_data[key]
+        if not html_data.get("empresa_nome") and not html_data.get("reclamante_nome"):
+            try:
+                suffix = numero[-10:].replace(".", "").replace("-", "")
+                html_content = await page.content()
+                with open(f"debug_detalhe_{suffix}.html", "w", encoding="utf-8") as f:
+                    f.write(html_content)
+                logger.warning(f"Detalhe {numero}: campos vazios (sem captcha) — HTML salvo em debug_detalhe_{suffix}.html")
+            except Exception:
+                pass
         return html_data
 
     # Resolver CAPTCHA (até 3 tentativas)
     for tentativa in range(1, 4):
         try:
             img_bytes = await captcha_img.screenshot()
+
+            # Salvar imagem do CAPTCHA para diagnóstico
+            try:
+                suffix = numero[-10:].replace(".", "").replace("-", "")
+                with open(f"debug_captcha_{suffix}.png", "wb") as f:
+                    f.write(img_bytes)
+                logger.info(f"CAPTCHA imagem salva: debug_captcha_{suffix}.png ({len(img_bytes)} bytes)")
+            except Exception:
+                pass
+
             resposta = solve_captcha_bytes(img_bytes)
 
             if not resposta:
