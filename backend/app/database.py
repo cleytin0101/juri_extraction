@@ -4,8 +4,6 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-_client: Client | None = None
-
 VARAS_TRT7 = [
     ("UVT-ARA",  "Única Vara do Trabalho de Aracati"),
     ("UVT-BAT",  "Única Vara do Trabalho de Baturité"),
@@ -59,15 +57,12 @@ VARAS_TRT7 = [
 
 
 def get_supabase() -> Client:
-    global _client
-    if _client is None:
-        if not settings.supabase_url or not settings.supabase_key:
-            raise RuntimeError(
-                "SUPABASE_URL e SUPABASE_KEY precisam estar configuradas. "
-                "Verifique as Environment Variables no Render (aba Environment do serviço)."
-            )
-        _client = create_client(settings.supabase_url, settings.supabase_key)
-    return _client
+    if not settings.supabase_url or not settings.supabase_key:
+        raise RuntimeError(
+            "SUPABASE_URL e SUPABASE_KEY precisam estar configuradas. "
+            "Verifique as Environment Variables no Render (aba Environment do serviço)."
+        )
+    return create_client(settings.supabase_url, settings.supabase_key)
 
 
 def seed_varas_if_empty(sb: Client) -> None:
