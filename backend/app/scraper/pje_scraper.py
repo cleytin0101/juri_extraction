@@ -541,6 +541,7 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
                 pass
 
             resposta = solve_captcha_bytes(img_bytes)
+            logger.warning(f"CAPTCHA tentativa {tentativa}: resposta='{resposta}'")
 
             if not resposta:
                 logger.warning(f"CAPTCHA não resolvido (tentativa {tentativa})")
@@ -557,7 +558,7 @@ async def _scrape_detalhe_processo(page: Page, numero: str) -> Optional[dict]:
 
             # Verificar se CAPTCHA foi aceito (página mudou)
             if await captcha_img.count() > 0:
-                logger.info(f"CAPTCHA incorreto (tentativa {tentativa}), tentando novamente...")
+                logger.warning(f"CAPTCHA incorreto (tentativa {tentativa}), tentando novamente...")
                 # Recarregar para novo CAPTCHA
                 await page.reload(wait_until="domcontentloaded")
                 await asyncio.sleep(1)
