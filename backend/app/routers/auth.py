@@ -271,8 +271,53 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
 async def _handle_otp(page, session: LoginSession, otp_selector: str) -> bool:
     """
     Gerencia o fluxo de código de verificação (TOTP/SMS/e-mail) com até 3 tentativas.
+    Se pje_totp_secret estiver configurado, gera o código automaticamente via pyotp.
     Retorna True se o login foi concluído com sucesso, False caso contrário.
     """
+    # Auto-TOTP: se a chave está configurada, gerar e submeter automaticamente
+    if settings.pje_totp_secret:
+        try:
+            import pyotp
+            for tentativa_auto in range(1, 3):  # 2 tentativas (cobre troca de intervalo de 30s)
+                totp_code = pyotp.TOTP(settings.pje_totp_secret).now()
+                session.mensagem = f"Enviando código TOTP automático... (tentativa {tentativa_auto})"
+                logger.info(f"TOTP automático gerado, tentativa {tentativa_auto}")
+
+                otp_field = page.locator(otp_selector)
+                await otp_field.fill(totp_code)
+
+                submit_btn = page.locator(
+                    "button[type='submit'], input[type='submit'], "
+                    "button:has-text('CONFIRMAR'), button:has-text('Confirmar'), "
+                    "button:has-text('VERIFICAR'), button:has-text('Verificar'), "
+                    "button:has-text('CONTINUAR'), button:has-text('Continuar'), "
+                    "button:has-text('ENVIAR'), button:has-text('Enviar'), "
+                    "button:has-text('ENTRAR'), button:has-text('Entrar')"
+                ).first
+                if await submit_btn.count() > 0:
+                    await submit_btn.click()
+                else:
+                    await otp_field.press("Enter")
+
+                # Polling 30s: sucesso ou código rejeitado
+                for _ in range(60):
+                    await asyncio.sleep(0.5)
+                    if "trt7.jus.br" in page.url and "sso.cloud.pje.jus.br" not in page.url:
+                        return True
+                    if await page.locator(otp_selector).count() > 0:
+                        logger.info(f"TOTP rejeitado (tentativa {tentativa_auto}), aguardando próximo intervalo")
+                        await asyncio.sleep(15)  # ~meio ciclo TOTP para tentar código diferente
+                        break
+                else:
+                    session.status = "erro"
+                    session.mensagem = "TOTP automático: timeout aguardando redirecionamento."
+                    return False
+
+            logger.warning("TOTP automático falhou 2x, iniciando fluxo manual")
+        except Exception as e:
+            logger.warning(f"Erro no TOTP automático: {e}, iniciando fluxo manual")
+
+    # Fluxo manual — fallback ou quando pje_totp_secret não está configurado
     for tentativa in range(1, 4):
         # Sinalizar ao frontend que está aguardando o código
         session.status = "aguardando_otp"

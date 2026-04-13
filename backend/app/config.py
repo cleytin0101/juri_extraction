@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Credenciais do advogado para PJe (opcional — pautas públicas não precisam)
     pje_cpf: str = ""
     pje_senha: str = ""
+    pje_totp_secret: str = ""
     # Dados do advogado para template WhatsApp
     advogado_nome: str = ""
     advogado_contato: str = ""
@@ -42,7 +43,7 @@ def load_runtime_credentials() -> None:
         return
     try:
         data = json.loads(CREDENTIALS_FILE.read_text(encoding="utf-8"))
-        for field in ("pje_cpf", "pje_senha", "advogado_nome", "advogado_contato", "infosimples_token"):
+        for field in ("pje_cpf", "pje_senha", "pje_totp_secret", "advogado_nome", "advogado_contato", "infosimples_token"):
             value = data.get(field, "")
             if value:
                 object.__setattr__(settings, field, value)
@@ -52,6 +53,7 @@ def load_runtime_credentials() -> None:
 
 
 def save_runtime_credentials(pje_cpf: str = "", pje_senha: str = "",
+                              pje_totp_secret: str = "",
                               advogado_nome: str = "", advogado_contato: str = "",
                               infosimples_token: str = "") -> None:
     """
@@ -72,6 +74,8 @@ def save_runtime_credentials(pje_cpf: str = "", pje_senha: str = "",
         updated["pje_cpf"] = pje_cpf
     if pje_senha is not None:
         updated["pje_senha"] = pje_senha
+    if pje_totp_secret is not None:
+        updated["pje_totp_secret"] = pje_totp_secret
     if advogado_nome is not None:
         updated["advogado_nome"] = advogado_nome
     if advogado_contato is not None:

@@ -11,6 +11,7 @@ class ConfiguracoesResponse(BaseModel):
     advogado_contato: str
     pje_cpf: str
     pje_senha_configurada: bool  # não retorna a senha, só se está configurada
+    pje_totp_secret_configurado: bool
     whatsapp_provider: str
     infosimples_token_configurado: bool  # não retorna o token, só se está configurado
 
@@ -20,6 +21,7 @@ class ConfiguracoesUpdate(BaseModel):
     advogado_contato: Optional[str] = None
     pje_cpf: Optional[str] = None
     pje_senha: Optional[str] = None
+    pje_totp_secret: Optional[str] = None
     infosimples_token: Optional[str] = None
 
 
@@ -30,6 +32,7 @@ def get_configuracoes():
         advogado_contato=settings.advogado_contato,
         pje_cpf=settings.pje_cpf,
         pje_senha_configurada=bool(settings.pje_senha),
+        pje_totp_secret_configurado=bool(settings.pje_totp_secret),
         whatsapp_provider=settings.whatsapp_provider,
         infosimples_token_configurado=bool(settings.infosimples_token),
     )
@@ -40,6 +43,7 @@ def post_configuracoes(body: ConfiguracoesUpdate):
     save_runtime_credentials(
         pje_cpf=body.pje_cpf if body.pje_cpf is not None else settings.pje_cpf,
         pje_senha=body.pje_senha if body.pje_senha is not None else settings.pje_senha,
+        pje_totp_secret=body.pje_totp_secret if body.pje_totp_secret is not None else settings.pje_totp_secret,
         advogado_nome=body.advogado_nome if body.advogado_nome is not None else settings.advogado_nome,
         advogado_contato=body.advogado_contato if body.advogado_contato is not None else settings.advogado_contato,
         infosimples_token=body.infosimples_token if body.infosimples_token is not None else settings.infosimples_token,

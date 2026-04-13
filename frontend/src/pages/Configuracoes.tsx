@@ -16,6 +16,9 @@ export function Configuracoes() {
   const [pjeSenha, setPjeSenha] = useState("");
   const [showSenha, setShowSenha] = useState(false);
   const [senhaConfigurada, setSenhaConfigurada] = useState(false);
+  const [pjeTotpSecret, setPjeTotpSecret] = useState("");
+  const [totpConfigurado, setTotpConfigurado] = useState(false);
+  const [showTotp, setShowTotp] = useState(false);
   const [infosimplesToken, setInfosimplesToken] = useState("");
   const [infosimplesConfigurado, setInfosimplesConfigurado] = useState(false);
   const [showToken, setShowToken] = useState(false);
@@ -40,6 +43,7 @@ export function Configuracoes() {
         setAdvogadoContato(data.advogado_contato);
         setPjeCpf(data.pje_cpf);
         setSenhaConfigurada(data.pje_senha_configurada);
+        setTotpConfigurado(data.pje_totp_secret_configurado);
         setInfosimplesConfigurado(data.infosimples_token_configurado);
       })
       .catch(() => {/* silently ignore load errors */});
@@ -117,12 +121,15 @@ export function Configuracoes() {
         pje_cpf: pjeCpf,
         // Only send if user typed something new
         ...(pjeSenha ? { pje_senha: pjeSenha } : {}),
+        ...(pjeTotpSecret ? { pje_totp_secret: pjeTotpSecret } : {}),
         ...(infosimplesToken ? { infosimples_token: infosimplesToken } : {}),
       });
       setSaved(true);
       setSenhaConfigurada(senhaConfigurada || !!pjeSenha);
+      setTotpConfigurado(totpConfigurado || !!pjeTotpSecret);
       setInfosimplesConfigurado(infosimplesConfigurado || !!infosimplesToken);
       setPjeSenha("");
+      setPjeTotpSecret("");
       setInfosimplesToken("");
       setTimeout(() => setSaved(false), 4000);
     } catch {
@@ -306,6 +313,34 @@ export function Configuracoes() {
                 {showSenha ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
+          </div>
+
+          <div>
+            <label className="text-gray-400 text-sm block mb-1">
+              Chave TOTP (Google Authenticator)
+              {totpConfigurado && !pjeTotpSecret && (
+                <span className="ml-2 text-accent-green text-xs font-normal">● configurada</span>
+              )}
+            </label>
+            <div className="relative">
+              <input
+                type={showTotp ? "text" : "password"}
+                placeholder={totpConfigurado ? "••••••• (deixe em branco para manter)" : "Chave base32 do autenticador"}
+                value={pjeTotpSecret}
+                onChange={(e) => setPjeTotpSecret(e.target.value.toUpperCase().replace(/\s/g, ""))}
+                className="w-full bg-surface-700 border border-surface-600 rounded-lg px-3 py-2 pr-10 text-white text-sm font-mono focus:outline-none focus:border-accent-blue"
+              />
+              <button
+                type="button"
+                onClick={() => setShowTotp(!showTotp)}
+                className="absolute right-3 top-2.5 text-gray-400 hover:text-white"
+              >
+                {showTotp ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+            <p className="text-gray-600 text-xs mt-1">
+              Quando configurada, o código 2FA é gerado automaticamente no login.
+            </p>
           </div>
         </div>
 
