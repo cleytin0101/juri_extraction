@@ -8,6 +8,7 @@ import { useMetrics } from "../hooks/useMetrics";
 import { useExtrairStatus } from "../hooks/useExtraction";
 import type { ExtrairJobStatus } from "../types/pauta";
 import { SparklesCore } from "@/components/ui/sparkles";
+import { cn } from "@/lib/utils";
 
 function fmtBRL(v: number) {
   if (v >= 1_000_000) return `R$ ${(v / 1_000_000).toFixed(1)}M`;

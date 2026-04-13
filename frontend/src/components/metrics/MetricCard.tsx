@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 import clsx from "clsx";
 
 interface Props {
@@ -7,11 +8,12 @@ interface Props {
   subtitle?: string;
   icon?: ReactNode;
   trend?: { value: string; positive: boolean };
+  className?: string;
 }
 
-export function MetricCard({ label, value, subtitle, icon, trend }: Props) {
+export function MetricCard({ label, value, subtitle, icon, trend, className }: Props) {
   return (
-    <div className="bg-surface-800 rounded-xl p-5 flex flex-col gap-2 border border-surface-600">
+    <div className={cn("bg-surface-800 rounded-xl p-5 flex flex-col gap-2 border border-surface-600", className)}>
       <div className="flex items-center justify-between text-gray-400 text-sm">
         <span>{label}</span>
         {icon && <span className="text-accent-blue">{icon}</span>}
