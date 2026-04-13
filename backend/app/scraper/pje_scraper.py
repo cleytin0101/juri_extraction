@@ -545,17 +545,31 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
                 pass
         return html_data
 
-    # Resolver CAPTCHA (até 3 tentativas)
-    for tentativa in range(1, 4):
+    # Resolver CAPTCHA (até 5 tentativas)
+    for tentativa in range(1, 6):
         try:
-            img_bytes = await captcha_img.screenshot()
+            # Preferir download direto via src (imagem original, sem artefatos de render)
+            img_bytes: Optional[bytes] = None
+            try:
+                captcha_src = await captcha_img.first.get_attribute("src") or ""
+                if captcha_src:
+                    if captcha_src.startswith("/"):
+                        captcha_src = f"https://pje.trt7.jus.br{captcha_src}"
+                    resp = await page.request.get(captcha_src)
+                    if resp.ok:
+                        img_bytes = await resp.body()
+                        logger.warning(f"CAPTCHA src={captcha_src} ({len(img_bytes)} bytes)")
+            except Exception as src_err:
+                logger.warning(f"CAPTCHA download via src falhou: {src_err}")
+
+            if not img_bytes:
+                img_bytes = await captcha_img.screenshot()
 
             # Salvar imagem do CAPTCHA para diagnóstico
             try:
                 suffix = numero[-10:].replace(".", "").replace("-", "")
                 with open(f"debug_captcha_{suffix}.png", "wb") as f:
                     f.write(img_bytes)
-                logger.info(f"CAPTCHA imagem salva: debug_captcha_{suffix}.png ({len(img_bytes)} bytes)")
             except Exception:
                 pass
 
@@ -602,7 +616,7 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
         except Exception as e:
             logger.warning(f"Erro na tentativa {tentativa} do CAPTCHA de {numero}: {e}")
 
-    logger.warning(f"Não foi possível resolver CAPTCHA de {numero} após 3 tentativas")
+    logger.warning(f"Não foi possível resolver CAPTCHA de {numero} após 5 tentativas")
     return None
 
 
