@@ -9,7 +9,6 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _ocr = None
-_ocr_old = None
 
 
 def _get_ocr():
@@ -17,17 +16,8 @@ def _get_ocr():
     if _ocr is None:
         import ddddocr
         _ocr = ddddocr.DdddOcr(show_ad=False)
-        logger.warning("ddddocr (novo modelo) carregado")
+        logger.warning("ddddocr carregado com sucesso")
     return _ocr
-
-
-def _get_ocr_old():
-    global _ocr_old
-    if _ocr_old is None:
-        import ddddocr
-        _ocr_old = ddddocr.DdddOcr(old_model=True, show_ad=False)
-        logger.warning("ddddocr (modelo antigo) carregado")
-    return _ocr_old
 
 
 def _preprocess(image_bytes: bytes) -> bytes:
@@ -45,36 +35,28 @@ def _preprocess(image_bytes: bytes) -> bytes:
 
 def solve_captcha_bytes(image_bytes: bytes) -> Optional[str]:
     """
-    Tenta dois modelos do ddddocr (novo + antigo) com pré-processamento.
-    Retorna o resultado com mais caracteres alfanuméricos, ou None.
+    Resolve CAPTCHA com ddddocr + pré-processamento de imagem.
+    Filtra apenas caracteres ASCII alfanuméricos (evita chinês/símbolos).
     """
-    results = []
-
-    # Modelo novo com pré-processamento
     try:
         processed = _preprocess(image_bytes)
-        r1 = _get_ocr().classification(processed)
-        c1 = "".join(c for c in r1 if c.isalnum())
-        logger.warning(f"CAPTCHA OCR novo='{r1}' → '{c1}'")
-        if c1:
-            results.append(c1)
-    except Exception as e:
-        logger.error(f"CAPTCHA OCR (novo modelo) erro: {e}")
+        ocr = _get_ocr()
 
-    # Modelo antigo com imagem original (sem pré-processamento)
-    try:
-        r2 = _get_ocr_old().classification(image_bytes)
-        c2 = "".join(c for c in r2 if c.isalnum())
-        logger.warning(f"CAPTCHA OCR antigo='{r2}' → '{c2}'")
-        if c2:
-            results.append(c2)
-    except Exception as e:
-        logger.error(f"CAPTCHA OCR (modelo antigo) erro: {e}")
+        # Tentar modelo com preprocessamento
+        result = ocr.classification(processed)
+        # Filtro estrito: apenas ASCII alfanumérico (evita caracteres chineses)
+        cleaned = "".join(c for c in result if c.isascii() and c.isalnum())
+        logger.warning(f"CAPTCHA OCR: '{result}' → '{cleaned}'")
 
-    if not results:
+        if cleaned:
+            return cleaned
+
+        # Fallback: imagem original sem preprocessamento
+        result2 = ocr.classification(image_bytes)
+        cleaned2 = "".join(c for c in result2 if c.isascii() and c.isalnum())
+        logger.warning(f"CAPTCHA OCR (fallback): '{result2}' → '{cleaned2}'")
+        return cleaned2 if cleaned2 else None
+
+    except Exception as e:
+        logger.error(f"Erro ao resolver CAPTCHA: {e}")
         return None
-
-    # Preferir o resultado mais longo (geralmente mais correto)
-    best = max(results, key=len)
-    logger.warning(f"CAPTCHA escolhido: '{best}'")
-    return best

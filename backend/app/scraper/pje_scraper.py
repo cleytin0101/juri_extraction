@@ -411,6 +411,22 @@ def _map_xhr_items(items: list, vara_nome: str, data_audiencia: date) -> List[di
     return audiencias
 
 
+def _parse_partes_texto(texto: str) -> tuple:
+    """
+    Extrai reclamante e empresa do texto da célula de processo.
+    Formato na tabela: '{tipo} {numero}\\n{reclamante} x {empresa}'
+    """
+    for linha in reversed(texto.split('\n')):
+        linha = linha.strip()
+        if ' x ' in linha and len(linha) > 5:
+            partes = linha.split(' x ', 1)
+            reclamante = re.sub(r'\s*\(\+\d+\).*$', '', partes[0]).strip()
+            empresa = re.sub(r'\s*\(\+\d+\).*$', '', partes[1]).strip() if len(partes) > 1 else ''
+            if reclamante and empresa:
+                return reclamante, empresa
+    return '', ''
+
+
 async def _parse_tabela_pautas(page: Page, vara_nome: str, data_audiencia: date) -> List[dict]:
     """Lê a tabela de audiências e extrai os dados de cada linha."""
     audiencias = []
@@ -455,6 +471,11 @@ async def _parse_tabela_pautas(page: Page, vara_nome: str, data_audiencia: date)
                 sala = (await cells.nth(TABLE_COLUMNS["sala"]).inner_text()).strip() if cell_count > TABLE_COLUMNS["sala"] else ""
                 situacao = (await cells.nth(TABLE_COLUMNS["situacao"]).inner_text()).strip() if cell_count > TABLE_COLUMNS["situacao"] else ""
 
+                # Extrair partes diretamente do texto da tabela (sem CAPTCHA)
+                reclamante_nome, empresa_nome = _parse_partes_texto(processo_text)
+                if reclamante_nome:
+                    logger.warning(f"Partes extraídas da tabela: '{reclamante_nome}' x '{empresa_nome}'")
+
                 # Montar data+hora da audiência
                 data_hora_str = f"{data_audiencia.strftime('%d/%m/%Y')} {horario}"
                 data_hora = parse_data_audiencia(data_hora_str)
@@ -468,9 +489,9 @@ async def _parse_tabela_pautas(page: Page, vara_nome: str, data_audiencia: date)
                     "situacao": situacao,
                     "horario": horario,
                     "detalhe_href": detalhe_href,
-                    # Campos a preencher na etapa 2
-                    "reclamante_nome": "",
-                    "empresa_nome": "",
+                    # Partes já extraídas da tabela — CAPTCHA só para enrichment
+                    "reclamante_nome": reclamante_nome,
+                    "empresa_nome": empresa_nome,
                     "empresa_cnpj": None,
                     "valor_causa": None,
                     "resumo_caso": "",
