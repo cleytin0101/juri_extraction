@@ -29,15 +29,28 @@ def _get_ocr():
 def solve_captcha_bytes(image_bytes: bytes) -> Optional[str]:
     """
     Resolve CAPTCHA a partir dos bytes da imagem.
+    Aplica pré-processamento (grayscale + autocontrast + binarização) para
+    melhorar a taxa de acerto do ddddocr em CAPTCHAs com ruído visual.
     Retorna o texto reconhecido ou None em caso de erro.
     """
     try:
+        import io
+        from PIL import Image, ImageOps
+
+        # Pré-processamento: remover ruído e aumentar contraste
+        img = Image.open(io.BytesIO(image_bytes)).convert("L")  # grayscale
+        img = ImageOps.autocontrast(img)                         # normalizar contraste
+        img = img.point(lambda x: 0 if x < 127 else 255)        # binarizar
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        processed_bytes = buf.getvalue()
+
         ocr = _get_ocr()
-        result = ocr.classification(image_bytes)
+        result = ocr.classification(processed_bytes)
         # Limpar resultado: manter apenas alfanuméricos
         cleaned = "".join(c for c in result if c.isalnum())
         logger.info(f"CAPTCHA resolvido: '{result}' → '{cleaned}'")
-        return cleaned
+        return cleaned if cleaned else None
     except Exception as e:
         logger.error(f"Erro ao resolver CAPTCHA: {e}")
         return None
