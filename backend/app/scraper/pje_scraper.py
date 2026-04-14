@@ -509,6 +509,8 @@ def _parse_partes_texto(texto: str) -> tuple:
             partes = linha.split(' x ', 1)
             reclamante = re.sub(r'\s*\(\+\d+\).*$', '', partes[0]).strip()
             empresa = re.sub(r'\s*\(\+\d+\).*$', '', partes[1]).strip() if len(partes) > 1 else ''
+            # Remover CPF/número que aparece antes do nome (ex: "46.245.801 NOME...")
+            empresa = re.sub(r'^\d[\d.]+\s+', '', empresa).strip()
             if reclamante and empresa:
                 return reclamante, empresa
     return '', ''
@@ -719,6 +721,13 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
     page_title = await page.title()
     logger.warning(f"Detalhe {numero}: URL_atual={page.url} | título='{page_title}'")
 
+    # Aguardar Angular renderizar — CAPTCHA ou página de detalhe
+    try:
+        await page.wait_for_load_state("networkidle", timeout=8000)
+    except Exception:
+        pass
+    await asyncio.sleep(1)
+
     # Verificar se tem CAPTCHA
     captcha_img = page.locator(SELECTORS["captcha_img"])
     captcha_count = await captcha_img.count()
@@ -752,12 +761,11 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
     for tentativa in range(1, 6):
         try:
             # Preferir download direto via src (imagem original, sem artefatos de render)
+            # Usar el.src (URL já resolvida e codificada pelo browser) em vez de getAttribute
             img_bytes: Optional[bytes] = None
             try:
-                captcha_src = await captcha_img.first.get_attribute("src") or ""
-                if captcha_src:
-                    if captcha_src.startswith("/"):
-                        captcha_src = f"https://pje.trt7.jus.br{captcha_src}"
+                captcha_src = await captcha_img.first.evaluate("el => el.src") or ""
+                if captcha_src and captcha_src.startswith("http"):
                     resp = await page.request.get(captcha_src)
                     if resp.ok:
                         img_bytes = await resp.body()
@@ -821,6 +829,7 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
                 await page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
                 pass
+            await asyncio.sleep(2)  # Angular termina de renderizar componentes após dados carregados
 
             # PDF é o objetivo principal — contém todos os dados necessários
             pdf_bytes = await _download_processo_pdf(page, numero)
@@ -860,14 +869,15 @@ async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
     """
     try:
         # Aguardar Angular renderizar o botão (pode demorar após navegação pós-CAPTCHA)
+        # state="attached" = basta estar no DOM; JS click funciona mesmo sem visibilidade
         try:
             await page.wait_for_selector(
                 "#btnDownloadIntegra, [aria-label='Baixar processo na íntegra']",
-                timeout=15000, state="visible"
+                timeout=15000, state="attached"
             )
-            logger.warning(f"Botão #btnDownloadIntegra visível para {numero}")
+            logger.warning(f"Botão #btnDownloadIntegra encontrado no DOM para {numero}")
         except Exception:
-            logger.warning(f"Botão #btnDownloadIntegra não apareceu em 15s para {numero}")
+            logger.warning(f"Botão #btnDownloadIntegra NÃO apareceu no DOM em 15s para {numero}")
 
         download_btn = page.locator(SELECTORS["btn_download_integra"]).first
 
