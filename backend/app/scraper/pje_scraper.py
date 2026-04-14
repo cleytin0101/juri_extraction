@@ -327,12 +327,26 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
                 logger.warning(f"JWT PJe capturado ({len(jwt_token)} chars)")
                 break
 
-    # Tentar usar dados XHR capturados primeiro (mais confiável que HTML)
+    # Tentar usar dados XHR capturados primeiro (timing/tipo mais confiáveis)
     if api_responses:
         logger.info(f"Tentando parsear {len(api_responses)} resposta(s) XHR...")
         audiencias = _parse_xhr_responses(api_responses, vara_nome, data_audiencia)
         if audiencias:
             logger.info(f"XHR: {len(audiencias)} audiências extraídas")
+            # Sempre complementar partes (reclamante/empresa) com a tabela HTML,
+            # pois o XHR frequentemente não traz os nomes das partes
+            tabela = await _parse_tabela_pautas(page, vara_nome, data_audiencia)
+            tabela_by_num = {a["numero_processo"]: a for a in tabela}
+            faltando = sum(1 for a in audiencias if not a.get("empresa_nome"))
+            logger.warning(f"XHR: {faltando}/{len(audiencias)} audiências sem empresa_nome — complementando da tabela")
+            for aud in audiencias:
+                t = tabela_by_num.get(aud["numero_processo"], {})
+                if not aud.get("empresa_nome"):
+                    aud["empresa_nome"] = t.get("empresa_nome", "")
+                if not aud.get("reclamante_nome"):
+                    aud["reclamante_nome"] = t.get("reclamante_nome", "")
+                if not aud.get("detalhe_href"):
+                    aud["detalhe_href"] = t.get("detalhe_href", "")
             return audiencias, jwt_token
 
     # Fallback: ler tabela HTML
@@ -814,20 +828,13 @@ async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
     """
     Clica no botão 'Baixar processo na íntegra' e retorna os bytes do PDF baixado.
     O download é interceptado pelo Playwright antes de tocar o disco.
+    Seletor confirmado via DevTools: <button id="btnDownloadIntegra" aria-label="Baixar processo na íntegra">
     """
     try:
-        # O botão aparece como ícone PDF ou link com esse texto
-        download_btn = page.locator(
-            "a[title*='ntegra'], a[href*='baixar'], a[href*='inteira'], "
-            "button:has-text('ntegra'), a:has-text('ntegra')"
-        ).first
+        download_btn = page.locator(SELECTORS["btn_download_integra"]).first
 
         if await download_btn.count() == 0:
-            # Fallback: qualquer link que pareça download de processo
-            download_btn = page.locator("a[href*='.pdf'], a[href*='download']").first
-
-        if await download_btn.count() == 0:
-            logger.warning(f"Botão de download não encontrado para {numero}")
+            logger.warning(f"Botão #btnDownloadIntegra não encontrado para {numero}")
             return None
 
         async with page.expect_download(timeout=60000) as download_info:
@@ -867,6 +874,7 @@ async def _extract_partes(page: Page) -> dict:
         "empresa_cnpj": None,
         "valor_causa": None,
         "resumo_caso": "",
+        "tem_advogado": False,
     }
 
     try:
@@ -908,10 +916,22 @@ async def _extract_partes(page: Page) -> dict:
             except ValueError:
                 pass
 
+        # Fallback: subtítulo da página de detalhe tem formato "X x Y"
+        # (ex: "JOYCE DOS SANTOS BARBOSA x NATALIA KESSIA G. MOTA")
+        if not result["empresa_nome"] or not result["reclamante_nome"]:
+            rec, emp = _parse_partes_texto(text)
+            result["reclamante_nome"] = result["reclamante_nome"] or rec
+            result["empresa_nome"] = result["empresa_nome"] or emp
+
+        # tem_advogado: timeline contém "Contestação" ou "Habilitação"
+        result["tem_advogado"] = bool(
+            re.search(r"Contesta[çc][aã]o|Habilita[çc][aã]o", text, re.IGNORECASE)
+        )
+
         logger.warning(
             f"_extract_partes resultado: reclamante='{result['reclamante_nome']}' "
             f"empresa='{result['empresa_nome']}' cnpj={result['empresa_cnpj']} "
-            f"valor={result['valor_causa']}"
+            f"valor={result['valor_causa']} advogado={result['tem_advogado']}"
         )
 
     except Exception as e:

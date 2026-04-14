@@ -46,6 +46,12 @@ SELECTORS = {
 
     # Reclamado (polo passivo — empresa)
     "reclamado": "text=RECLAMADO",
+
+    # Botão "Baixar processo na íntegra" (confirmado via DevTools — Angular id fixo)
+    "btn_download_integra": (
+        "#btnDownloadIntegra, "
+        "[aria-label='Baixar processo na íntegra']"
+    ),
 }
 
 # Colunas da tabela de pautas (índice 0-based)
