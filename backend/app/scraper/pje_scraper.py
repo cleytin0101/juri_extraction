@@ -391,6 +391,11 @@ def _map_xhr_items(items: list, vara_nome: str, data_audiencia: date) -> List[di
     Mapeia items do JSON XHR para o formato interno de audiência.
     Tenta campos comuns que o PJe costuma usar.
     """
+    # Log da estrutura do primeiro item para diagnóstico
+    if items and isinstance(items[0], dict):
+        logger.warning(f"XHR item campos disponíveis: {list(items[0].keys())}")
+        logger.warning(f"XHR item[0] completo: {str(items[0])[:800]}")
+
     audiencias = []
     for item in items:
         if not isinstance(item, dict):
@@ -402,19 +407,57 @@ def _map_xhr_items(items: list, vara_nome: str, data_audiencia: date) -> List[di
             or item.get("numero_processo")
             or item.get("processo")
             or item.get("numProcesso")
+            or item.get("numero")
             or ""
         )
         numero = parse_numero_processo(str(numero)) if numero else ""
         if not numero:
             continue
 
-        horario = str(item.get("horario") or item.get("hora") or item.get("horaAudiencia") or "")
-        tipo_raw = str(item.get("tipo") or item.get("tipoAudiencia") or item.get("tipo_audiencia") or "")
-        sala = str(item.get("sala") or item.get("local") or "")
-        situacao = str(item.get("situacao") or item.get("status") or "")
+        horario = str(item.get("horario") or item.get("hora") or item.get("horaAudiencia") or item.get("horaInicio") or "")
+        tipo_raw = str(item.get("tipo") or item.get("tipoAudiencia") or item.get("tipo_audiencia") or item.get("descricaoTipo") or "")
+        sala = str(item.get("sala") or item.get("local") or item.get("localAudiencia") or "")
+        situacao = str(item.get("situacao") or item.get("status") or item.get("descricaoSituacao") or "")
 
         data_hora_str = f"{data_audiencia.strftime('%d/%m/%Y')} {horario}"
         data_hora = parse_data_audiencia(data_hora_str)
+
+        # Reclamante — muitos nomes de campo possíveis no PJe
+        reclamante = str(
+            item.get("reclamante") or item.get("reclamanteNome") or
+            item.get("nomeReclamante") or item.get("nome_reclamante") or
+            item.get("parteAtiva") or item.get("polo_ativo") or
+            item.get("autor") or item.get("nomeAutor") or ""
+        )
+
+        # Empresa (reclamada) — muitos nomes de campo possíveis no PJe
+        empresa = str(
+            item.get("reclamado") or item.get("reclamadoNome") or
+            item.get("nomeReclamado") or item.get("nome_reclamado") or
+            item.get("partePassiva") or item.get("polo_passivo") or
+            item.get("reu") or item.get("nomeReu") or
+            item.get("empresa") or item.get("nomeEmpresa") or ""
+        )
+
+        # Tentar extrair partes de um campo "partes" aninhado
+        if not reclamante or not empresa:
+            partes = item.get("partes") or item.get("partesProcesso") or []
+            if isinstance(partes, list):
+                for p in partes:
+                    if not isinstance(p, dict):
+                        continue
+                    polo = str(p.get("polo") or p.get("tipoPolo") or "").upper()
+                    nome = str(p.get("nome") or p.get("nomeParte") or "")
+                    if "ATIVO" in polo or "RECLAMANTE" in polo:
+                        reclamante = reclamante or nome
+                    elif "PASSIVO" in polo or "RECLAMADO" in polo or "REU" in polo:
+                        empresa = empresa or nome
+
+        # Tentar extrair do campo "processo" aninhado
+        proc_obj = item.get("processo") if isinstance(item.get("processo"), dict) else {}
+        if proc_obj:
+            reclamante = reclamante or str(proc_obj.get("reclamante") or proc_obj.get("nomeReclamante") or "")
+            empresa = empresa or str(proc_obj.get("reclamado") or proc_obj.get("nomeReclamado") or "")
 
         audiencias.append({
             "numero_processo": numero,
@@ -424,8 +467,8 @@ def _map_xhr_items(items: list, vara_nome: str, data_audiencia: date) -> List[di
             "sala": sala,
             "situacao": situacao,
             "horario": horario,
-            "reclamante_nome": str(item.get("reclamante") or item.get("reclamanteNome") or ""),
-            "empresa_nome": str(item.get("reclamado") or item.get("reclamadoNome") or ""),
+            "reclamante_nome": reclamante,
+            "empresa_nome": empresa,
             "empresa_cnpj": None,
             "valor_causa": None,
             "resumo_caso": "",
@@ -576,7 +619,8 @@ async def _fetch_detalhe_api(numero: str, jwt: str) -> Optional[dict]:
     Tenta múltiplos endpoints até obter dados relevantes.
     """
     import urllib.parse
-    numero_enc = urllib.parse.quote(numero, safe="")
+    # Manter pontos e hífens (são parte do número do processo — não codificar)
+    numero_enc = urllib.parse.quote(numero, safe=".-")
     headers = {
         "Authorization": f"Bearer {jwt}",
         "Accept": "application/json",
@@ -585,8 +629,10 @@ async def _fetch_detalhe_api(numero: str, jwt: str) -> Optional[dict]:
     endpoints = [
         f"{base}/processos/{numero_enc}",
         f"{base}/processos?numero={numero_enc}",
+        f"{base}/processos?numeroProcesso={numero_enc}",
         f"{base}/detalhe-processo/{numero_enc}",
         f"{base}/processo/{numero_enc}",
+        f"{base}/consulta/processo/{numero_enc}",
     ]
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
@@ -812,7 +858,8 @@ async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
 async def _extract_partes(page: Page) -> dict:
     """
     Extrai reclamante e empresa reclamada da página de detalhe.
-    Baseado no layout visto nas imagens: 'RECLAMANTE: ...' e 'RECLAMADO: ...'
+    Usa document.body.innerText (texto renderizado pelo Angular, sem tags HTML)
+    para que os regex funcionem corretamente em apps Angular/SPA.
     """
     result = {
         "reclamante_nome": "",
@@ -823,39 +870,49 @@ async def _extract_partes(page: Page) -> dict:
     }
 
     try:
-        content = await page.content()
+        # Aguardar Angular terminar de renderizar
+        try:
+            await page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
+        await asyncio.sleep(1)
 
-        # Extrair RECLAMANTE
-        reclamante_match = re.search(
-            r"RECLAMANTE[:\s]+([A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇa-záàâãéêíóôõúüç\s]+?)(?=RECLAMADO|$)",
-            content,
-            re.IGNORECASE,
-        )
-        if reclamante_match:
-            result["reclamante_nome"] = reclamante_match.group(1).strip()
+        # Usar innerText: texto visível ao usuário, sem tags HTML
+        text = await page.evaluate("() => document.body.innerText")
+        logger.warning(f"innerText página detalhe (600 chars): {text[:600]}")
 
-        # Extrair RECLAMADO (empresa)
-        reclamado_match = re.search(
-            r"RECLAMADO[:\s]+([A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇa-záàâãéêíóôõúüç\s\-\.\/]+?)(?=\n|<|CNPJ|CPF|$)",
-            content,
-            re.IGNORECASE,
-        )
-        if reclamado_match:
-            result["empresa_nome"] = reclamado_match.group(1).strip()
+        # Extrair RECLAMANTE — captura tudo até a próxima linha
+        rec_match = re.search(r"RECLAMANTE[:\s]+([^\n\r]+)", text, re.IGNORECASE)
+        if rec_match:
+            result["reclamante_nome"] = rec_match.group(1).strip()
 
-        # Tentar extrair CNPJ se presente
-        cnpj_match = re.search(r"\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}", content)
+        # Extrair RECLAMADO — captura tudo até a próxima linha
+        rec2_match = re.search(r"RECLAMADO[:\s]+([^\n\r]+)", text, re.IGNORECASE)
+        if rec2_match:
+            val = rec2_match.group(1).strip()
+            # Remove CNPJ/CPF que apareça colado ao nome
+            val = re.sub(r"\s*[\d]{2}\.[\d]{3}\.[\d]{3}[/\-][\d]{4}[-\d]{2,5}.*$", "", val).strip()
+            result["empresa_nome"] = val
+
+        # CNPJ — formato XX.XXX.XXX/XXXX-XX ou sem formatação
+        cnpj_match = re.search(r"\d{2}\.?\d{3}\.?\d{3}[/\s]?\d{4}-?\d{2}", text)
         if cnpj_match:
             result["empresa_cnpj"] = re.sub(r"\D", "", cnpj_match.group())
 
-        # Tentar extrair valor da causa
-        valor_match = re.search(r"[Vv]alor[:\s]+R?\$?\s*([\d.,]+)", content)
+        # Valor da causa — "Valor: R$ 1.234,56" ou "Valor da Causa: 1234,56"
+        valor_match = re.search(r"[Vv]alor[^:\n]{0,20}[:\s]+R?\$?\s*([\d.,]+)", text)
         if valor_match:
             try:
                 v = valor_match.group(1).replace(".", "").replace(",", ".")
                 result["valor_causa"] = float(v)
             except ValueError:
                 pass
+
+        logger.warning(
+            f"_extract_partes resultado: reclamante='{result['reclamante_nome']}' "
+            f"empresa='{result['empresa_nome']}' cnpj={result['empresa_cnpj']} "
+            f"valor={result['valor_causa']}"
+        )
 
     except Exception as e:
         logger.warning(f"Erro ao extrair partes: {e}")
