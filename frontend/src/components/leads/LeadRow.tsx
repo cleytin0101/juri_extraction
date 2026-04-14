@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MessageCircle, FileText, UserCheck, UserX } from "lucide-react";
+import { MessageCircle, FileText, UserCheck, UserX, Phone } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { StatusBadge } from "./StatusBadge";
@@ -21,6 +21,12 @@ function fmtData(d: string) {
   } catch {
     return d;
   }
+}
+
+function fmtCnpj(cnpj: string) {
+  const d = cnpj.replace(/\D/g, "");
+  if (d.length !== 14) return cnpj;
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
 }
 
 function pdfValido(lead: Lead): boolean {
@@ -46,6 +52,32 @@ export function LeadRow({ lead }: { lead: Lead }) {
             <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-900/30 text-green-400">
               <UserX size={10} /> Sem advogado
             </span>
+          )}
+          {/* Reclamante */}
+          {lead.reclamante_nome && (
+            <div className="text-gray-500 text-xs mt-1">
+              Reclamante: <span className="text-gray-300">{lead.reclamante_nome}</span>
+            </div>
+          )}
+          {/* CNPJ */}
+          {lead.empresa_cnpj && (
+            <div className="text-gray-500 text-xs">
+              CNPJ: <span className="text-gray-300">{fmtCnpj(lead.empresa_cnpj)}</span>
+            </div>
+          )}
+          {/* Telefones */}
+          {lead.empresa_telefones && lead.empresa_telefones.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {lead.empresa_telefones.slice(0, 3).map((tel, i) => (
+                <span key={i} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-yellow-900/30 text-yellow-400">
+                  <Phone size={9} /> {tel}
+                  <span className="text-gray-500 ml-0.5">via CNPJ</span>
+                </span>
+              ))}
+              {lead.empresa_telefones.length > 3 && (
+                <span className="text-[10px] text-gray-500">+{lead.empresa_telefones.length - 3}</span>
+              )}
+            </div>
           )}
         </td>
         <td className="px-4 py-3 text-gray-300 text-sm">{fmtData(lead.data_audiencia)}</td>

@@ -54,13 +54,13 @@ def get_metrics():
 
     # Funil de conversão
     # audiências → com telefone → enviados → respondidos → convertidos
-    com_telefone = (
+    tel_result = (
         sb.table("empresas")
-        .select("id", count="exact")
+        .select("telefones")
         .not_.is_("telefones", "null")
         .execute()
     )
-    telefones_count = com_telefone.count or 0
+    telefones_count = sum(1 for r in (tel_result.data or []) if r.get("telefones"))
 
     enviados = (
         sb.table("leads")
