@@ -23,6 +23,7 @@ from datetime import date
 from pathlib import Path
 from typing import List, Optional
 
+import httpx
 from playwright.async_api import async_playwright, Page
 
 from .selectors import SELECTORS, TABLE_COLUMNS
@@ -161,18 +162,19 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
             else:
                 logger.info("Sem credenciais e sem sessão — acessando pautas como consulta pública")
 
-            # ETAPA 1: extrair lista de audiências
-            audiencias = await _scrape_lista_pautas(page, vara_nome, data_audiencia)
+            # ETAPA 1: extrair lista de audiências + capturar JWT
+            audiencias, jwt_token = await _scrape_lista_pautas(page, vara_nome, data_audiencia)
             logger.info(f"Etapa 1: {len(audiencias)} audiências encontradas em {vara_nome}")
 
-            # ETAPA 2: detalhe de cada processo
-            # Se token da Infosimples estiver configurado, usa a API (sem CAPTCHA).
-            # Caso contrário, usa o scraper local com ddddocr.
+            # ETAPA 2: enriquecer cada processo (valor_causa, CNPJ)
+            # Prioridade: 1) Infosimples, 2) API PJe com JWT, 3) CAPTCHA scraper
             use_infosimples = bool(settings.infosimples_token)
             if use_infosimples:
-                logger.info("ETAPA 2: usando API Infosimples (sem CAPTCHA)")
+                logger.info("ETAPA 2: usando API Infosimples")
+            elif jwt_token:
+                logger.warning("ETAPA 2: usando API PJe com JWT (sem CAPTCHA)")
             else:
-                logger.info("ETAPA 2: usando scraper local com CAPTCHA (token Infosimples não configurado)")
+                logger.warning("ETAPA 2: sem JWT — usando CAPTCHA scraper")
 
             processos = []
             for aud in audiencias:
@@ -180,12 +182,25 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
                 if not numero:
                     continue
                 try:
+                    detalhe = None
+
                     if use_infosimples:
                         detalhe = await fetch_processo_infosimples(numero, token=settings.infosimples_token)
-                        # Infosimples não fornece PDF — pdf_bytes fica None
                         if detalhe:
                             detalhe["pdf_bytes"] = None
                         await asyncio.sleep(0.5)
+                    elif jwt_token:
+                        # Tentar API PJe primeiro (sem CAPTCHA)
+                        detalhe = await _fetch_detalhe_api(numero, jwt_token)
+                        if not detalhe:
+                            # Fallback: CAPTCHA scraper
+                            detail_page = await context.new_page()
+                            detalhe = await _scrape_detalhe_processo(
+                                detail_page, numero,
+                                url_override=aud.get("detalhe_href", ""),
+                            )
+                            await detail_page.close()
+                            await asyncio.sleep(1.5)
                     else:
                         detail_page = await context.new_page()
                         detalhe = await _scrape_detalhe_processo(
@@ -303,13 +318,22 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
         await _screenshot(page, "debug_04_pesquisar_erro.png")
         return []
 
+    # Extrair JWT do access_token capturado no XHR de auth
+    jwt_token = ""
+    for r in api_responses:
+        if "/api/auth/pje" in r["url"] and isinstance(r["body"], dict):
+            jwt_token = r["body"].get("access_token", "")
+            if jwt_token:
+                logger.warning(f"JWT PJe capturado ({len(jwt_token)} chars)")
+                break
+
     # Tentar usar dados XHR capturados primeiro (mais confiável que HTML)
     if api_responses:
         logger.info(f"Tentando parsear {len(api_responses)} resposta(s) XHR...")
         audiencias = _parse_xhr_responses(api_responses, vara_nome, data_audiencia)
         if audiencias:
             logger.info(f"XHR: {len(audiencias)} audiências extraídas")
-            return audiencias
+            return audiencias, jwt_token
 
     # Fallback: ler tabela HTML
     audiencias = await _parse_tabela_pautas(page, vara_nome, data_audiencia)
@@ -326,7 +350,7 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
         except Exception:
             pass
 
-    return audiencias
+    return audiencias, jwt_token
 
 
 async def _screenshot(page: Page, path: str) -> None:
@@ -511,6 +535,76 @@ async def _parse_tabela_pautas(page: Page, vara_nome: str, data_audiencia: date)
     return audiencias
 
 
+def _map_api_detalhe(data) -> Optional[dict]:
+    """Mapeia resposta da API PJe para formato interno de enrichment."""
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        return None
+
+    valor_raw = (
+        data.get("valorCausa") or data.get("valor_causa")
+        or data.get("valor") or data.get("valorAcao")
+    )
+    valor = None
+    if valor_raw:
+        try:
+            valor = float(str(valor_raw).replace(".", "").replace(",", "."))
+        except Exception:
+            pass
+
+    cnpj_raw = str(
+        data.get("cnpjReclamado") or data.get("cnpj") or
+        data.get("documentoReclamado") or ""
+    ).strip()
+    cnpj = re.sub(r"\D", "", cnpj_raw) if cnpj_raw else None
+
+    assunto = str(data.get("assunto") or data.get("resumo") or data.get("objeto") or "").strip()
+
+    result = {
+        "empresa_cnpj": cnpj or None,
+        "valor_causa": valor,
+        "resumo_caso": assunto,
+        "pdf_bytes": None,
+    }
+    return result if any(v for v in result.values() if v) else None
+
+
+async def _fetch_detalhe_api(numero: str, jwt: str) -> Optional[dict]:
+    """
+    Busca detalhes do processo via API REST do PJe usando o JWT capturado do XHR.
+    Tenta múltiplos endpoints até obter dados relevantes.
+    """
+    import urllib.parse
+    numero_enc = urllib.parse.quote(numero, safe="")
+    headers = {
+        "Authorization": f"Bearer {jwt}",
+        "Accept": "application/json",
+    }
+    base = "https://pje.trt7.jus.br/pje-consulta-api/api"
+    endpoints = [
+        f"{base}/processos/{numero_enc}",
+        f"{base}/processos?numero={numero_enc}",
+        f"{base}/detalhe-processo/{numero_enc}",
+        f"{base}/processo/{numero_enc}",
+    ]
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+        for url in endpoints:
+            try:
+                resp = await client.get(url, headers=headers)
+                logger.warning(f"API PJe {url} → {resp.status_code}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    logger.warning(f"API PJe response: {str(data)[:400]}")
+                    mapped = _map_api_detalhe(data)
+                    if mapped:
+                        return mapped
+            except Exception as e:
+                logger.warning(f"API PJe {url}: {e}")
+    return None
+
+
 async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = "") -> Optional[dict]:
     """
     ETAPA 2: Acessa a página de detalhe do processo.
@@ -619,9 +713,38 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
                 captcha_img = page.locator(SELECTORS["captcha_img"])
                 continue
 
-            # CAPTCHA aceito — extrair dados do HTML e do PDF
-            logger.info(f"CAPTCHA resolvido com sucesso (tentativa {tentativa})")
-            html_data = await _extract_partes(page)
+            # CAPTCHA aceito — interceptar XHR que a página Angular carrega
+            logger.warning(f"CAPTCHA aceito (tentativa {tentativa}) — aguardando XHR do detalhe")
+            detalhe_xhr: list = []
+
+            async def _on_detalhe_xhr(resp):
+                if "trt7.jus.br" in resp.url and resp.status == 200:
+                    ct = resp.headers.get("content-type", "")
+                    if "json" in ct:
+                        try:
+                            body = await resp.json()
+                            detalhe_xhr.append({"url": resp.url, "body": body})
+                            logger.warning(f"XHR detalhe: {resp.url} → {str(body)[:300]}")
+                        except Exception:
+                            pass
+
+            page.on("response", _on_detalhe_xhr)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
+
+            # Tentar extrair do XHR capturado
+            html_data = {}
+            for r in detalhe_xhr:
+                mapped = _map_api_detalhe(r["body"])
+                if mapped:
+                    html_data.update({k: v for k, v in mapped.items() if v})
+                    break
+
+            # Fallback: parsear HTML
+            if not html_data.get("empresa_cnpj") and not html_data.get("valor_causa"):
+                html_data.update(await _extract_partes(page))
 
             # Tentar baixar o PDF completo e enriquecer com dados dele
             pdf_bytes = await _download_processo_pdf(page, numero)
