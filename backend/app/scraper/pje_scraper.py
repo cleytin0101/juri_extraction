@@ -599,24 +599,47 @@ def _map_api_detalhe(data) -> Optional[dict]:
     if not isinstance(data, dict):
         return None
 
+    # Confirmado nos logs: PJe usa 'valorDaCausa' (não 'valorCausa')
     valor_raw = (
-        data.get("valorCausa") or data.get("valor_causa")
+        data.get("valorDaCausa") or data.get("valorCausa") or data.get("valor_causa")
         or data.get("valor") or data.get("valorAcao")
     )
     valor = None
-    if valor_raw:
+    if valor_raw is not None:
         try:
             valor = float(str(valor_raw).replace(".", "").replace(",", "."))
         except Exception:
             pass
 
+    # Tentar extrair CNPJ do campo direto ou do array de partes
+    cnpj = None
     cnpj_raw = str(
         data.get("cnpjReclamado") or data.get("cnpj") or
         data.get("documentoReclamado") or ""
     ).strip()
-    cnpj = re.sub(r"\D", "", cnpj_raw) if cnpj_raw else None
+    if cnpj_raw:
+        cnpj = re.sub(r"\D", "", cnpj_raw) or None
 
-    assunto = str(data.get("assunto") or data.get("resumo") or data.get("objeto") or "").strip()
+    # Tentar extrair CNPJ das partes (polo passivo)
+    if not cnpj:
+        partes = data.get("partes") or data.get("partesProcesso") or []
+        if isinstance(partes, list):
+            for p in partes:
+                if not isinstance(p, dict):
+                    continue
+                polo = str(p.get("polo") or p.get("tipoPolo") or "").upper()
+                if "PASSIVO" in polo or "RECLAMADO" in polo or "REU" in polo:
+                    doc = str(p.get("cpfCnpj") or p.get("cnpj") or p.get("documento") or "")
+                    doc_digits = re.sub(r"\D", "", doc)
+                    if len(doc_digits) == 14:  # CNPJ tem 14 dígitos
+                        cnpj = doc_digits
+                        break
+
+    assuntos = data.get("assuntos") or []
+    assunto = ""
+    if isinstance(assuntos, list) and assuntos:
+        assunto = str(assuntos[0].get("descricao") or assuntos[0].get("assunto") or "")
+    assunto = assunto or str(data.get("assunto") or data.get("resumo") or data.get("objeto") or "").strip()
 
     result = {
         "empresa_cnpj": cnpj or None,
@@ -784,7 +807,7 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
                         try:
                             body = await resp.json()
                             detalhe_xhr.append({"url": resp.url, "body": body})
-                            logger.warning(f"XHR detalhe: {resp.url} → {str(body)[:300]}")
+                            logger.warning(f"XHR detalhe: {resp.url} → {str(body)[:800]}")
                         except Exception:
                             pass
 
@@ -802,9 +825,12 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
                     html_data.update({k: v for k, v in mapped.items() if v})
                     break
 
-            # Fallback: parsear HTML
-            if not html_data.get("empresa_cnpj") and not html_data.get("valor_causa"):
-                html_data.update(await _extract_partes(page))
+            # Sempre chamar _extract_partes para tem_advogado + campos faltantes
+            # (não sobrescreve campos já preenchidos pelo XHR)
+            partes_data = await _extract_partes(page)
+            for key, val in partes_data.items():
+                if not html_data.get(key):
+                    html_data[key] = val
 
             # Tentar baixar o PDF completo e enriquecer com dados dele
             pdf_bytes = await _download_processo_pdf(page, numero)
@@ -841,10 +867,12 @@ async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
             await download_btn.click()
 
         download = await download_info.value
-        pdf_bytes = await (await download.path()).read_bytes() if await download.path() else None
+        # read_bytes() é SÍNCRONO — não usar await
+        path = await download.path()
+        pdf_bytes = path.read_bytes() if path else None
 
         # Alternativa: ler do stream
-        if pdf_bytes is None:
+        if not pdf_bytes:
             stream = await download.open_read_stream()
             chunks = []
             while True:
@@ -852,7 +880,7 @@ async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
                 if not chunk:
                     break
                 chunks.append(chunk)
-            pdf_bytes = b"".join(chunks)
+            pdf_bytes = b"".join(chunks) or None
 
         logger.info(f"PDF baixado para {numero}: {len(pdf_bytes or b'')} bytes")
         return pdf_bytes
