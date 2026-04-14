@@ -211,7 +211,13 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
                         await asyncio.sleep(1.5)
 
                     if detalhe:
-                        processos.append({**aud, **detalhe})
+                        # Merge: detalhe enriquece aud mas NÃO sobrescreve campos
+                        # que já foram extraídos da tabela com valores não-vazios
+                        merged = dict(aud)
+                        for k, v in detalhe.items():
+                            if v is not None and v != "" and v != []:
+                                merged[k] = v
+                        processos.append(merged)
                     else:
                         processos.append(aud)
 
@@ -694,7 +700,13 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
     Resolve o CAPTCHA automaticamente com ddddocr e extrai partes.
     url_override: se fornecido, usa este URL em vez de construir a partir do número.
     """
-    url = url_override if url_override else f"{BASE_URL}/captcha/detalhe-processo/{numero}/1"
+    # Sempre usar a URL com CAPTCHA — a URL direta (/detalhe-processo/) não retorna dados
+    # sem o token de desafio gerado pelo fluxo do CAPTCHA.
+    # url_override só é usado se já contiver /captcha/ (link autenticado da tabela).
+    if url_override and "/captcha/" in url_override:
+        url = url_override
+    else:
+        url = f"{BASE_URL}/captcha/detalhe-processo/{numero}/1"
     logger.warning(f"Detalhe {numero}: acessando URL={url}")
 
     try:
@@ -863,8 +875,10 @@ async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
             logger.warning(f"Botão #btnDownloadIntegra não encontrado para {numero}")
             return None
 
+        logger.warning(f"Clicando em #btnDownloadIntegra para {numero}")
         async with page.expect_download(timeout=60000) as download_info:
-            await download_btn.click()
+            # JavaScript click ignora re-renderização do Angular (DOM detachment)
+            await page.evaluate('document.querySelector("#btnDownloadIntegra").click()')
 
         download = await download_info.value
         # read_bytes() é SÍNCRONO — não usar await
