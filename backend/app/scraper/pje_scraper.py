@@ -736,23 +736,16 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
             logger.warning(f"Detalhe {numero}: HTML salvo em debug_detalhe_{suffix}.html ({len(html_content)} chars)")
         except Exception:
             pass
-        html_data = await _extract_partes(page)
+        # PDF é o objetivo principal — contém todos os dados necessários
         pdf_bytes = await _download_processo_pdf(page, numero)
-        html_data["pdf_bytes"] = pdf_bytes
         if pdf_bytes:
-            pdf_data = parse_pdf_text(pdf_bytes)
-            for key in ("reclamante_nome", "empresa_nome", "empresa_cnpj", "valor_causa", "resumo_caso", "tem_advogado"):
-                if pdf_data.get(key) is not None and pdf_data.get(key) != "":
-                    html_data[key] = pdf_data[key]
-        if not html_data.get("empresa_nome") and not html_data.get("reclamante_nome"):
-            try:
-                suffix = numero[-10:].replace(".", "").replace("-", "")
-                html_content = await page.content()
-                with open(f"debug_detalhe_{suffix}.html", "w", encoding="utf-8") as f:
-                    f.write(html_content)
-                logger.warning(f"Detalhe {numero}: campos vazios (sem captcha) — HTML salvo em debug_detalhe_{suffix}.html")
-            except Exception:
-                pass
+            logger.warning(f"Detalhe {numero}: PDF baixado ({len(pdf_bytes)} bytes) — extraindo dados")
+            html_data = parse_pdf_text(pdf_bytes)
+            html_data["pdf_bytes"] = pdf_bytes
+        else:
+            logger.warning(f"Detalhe {numero}: PDF não baixado (sem captcha) — usando dados da página HTML")
+            html_data = await _extract_partes(page)
+            html_data["pdf_bytes"] = None
         return html_data
 
     # Resolver CAPTCHA (até 5 tentativas)
@@ -829,29 +822,26 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
             except Exception:
                 pass
 
-            # Tentar extrair do XHR capturado
-            html_data = {}
-            for r in detalhe_xhr:
-                mapped = _map_api_detalhe(r["body"])
-                if mapped:
-                    html_data.update({k: v for k, v in mapped.items() if v})
-                    break
-
-            # Sempre chamar _extract_partes para tem_advogado + campos faltantes
-            # (não sobrescreve campos já preenchidos pelo XHR)
-            partes_data = await _extract_partes(page)
-            for key, val in partes_data.items():
-                if not html_data.get(key):
-                    html_data[key] = val
-
-            # Tentar baixar o PDF completo e enriquecer com dados dele
+            # PDF é o objetivo principal — contém todos os dados necessários
             pdf_bytes = await _download_processo_pdf(page, numero)
-            html_data["pdf_bytes"] = pdf_bytes  # armazenar para upload posterior
             if pdf_bytes:
-                pdf_data = parse_pdf_text(pdf_bytes)
-                for key in ("reclamante_nome", "empresa_nome", "empresa_cnpj", "valor_causa", "resumo_caso", "tem_advogado"):
-                    if pdf_data.get(key) is not None and pdf_data.get(key) != "":
-                        html_data[key] = pdf_data[key]
+                logger.warning(f"Detalhe {numero}: PDF baixado ({len(pdf_bytes)} bytes) — extraindo dados")
+                html_data = parse_pdf_text(pdf_bytes)
+                html_data["pdf_bytes"] = pdf_bytes
+            else:
+                # Fallback: usar XHR + HTML quando PDF não disponível
+                logger.warning(f"Detalhe {numero}: PDF não baixado — usando fallback XHR/HTML")
+                html_data = {}
+                for r in detalhe_xhr:
+                    mapped = _map_api_detalhe(r["body"])
+                    if mapped:
+                        html_data.update({k: v for k, v in mapped.items() if v})
+                        break
+                partes_data = await _extract_partes(page)
+                for key, val in partes_data.items():
+                    if not html_data.get(key):
+                        html_data[key] = val
+                html_data["pdf_bytes"] = None
 
             return html_data
 
@@ -869,6 +859,16 @@ async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
     Seletor confirmado via DevTools: <button id="btnDownloadIntegra" aria-label="Baixar processo na íntegra">
     """
     try:
+        # Aguardar Angular renderizar o botão (pode demorar após navegação pós-CAPTCHA)
+        try:
+            await page.wait_for_selector(
+                "#btnDownloadIntegra, [aria-label='Baixar processo na íntegra']",
+                timeout=15000, state="visible"
+            )
+            logger.warning(f"Botão #btnDownloadIntegra visível para {numero}")
+        except Exception:
+            logger.warning(f"Botão #btnDownloadIntegra não apareceu em 15s para {numero}")
+
         download_btn = page.locator(SELECTORS["btn_download_integra"]).first
 
         if await download_btn.count() == 0:
