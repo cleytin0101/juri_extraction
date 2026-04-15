@@ -1,8 +1,9 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter
 from ..models.pauta import ExtrairRequest, ExtrairResponse, ExtrairJobStatus
 from ..services.extraction_service import run_extraction
 from ..database import get_supabase
@@ -16,10 +17,11 @@ _MAX_JOBS = 100  # manter só os últimos 100
 
 
 @router.post("", response_model=ExtrairResponse, status_code=202)
-async def extrair_pauta(req: ExtrairRequest, background_tasks: BackgroundTasks):
+async def extrair_pauta(req: ExtrairRequest):
     """
     Dispara extração de pauta em background para cada combinação (vara, data).
-    Retorna 202 imediatamente.
+    Retorna 202 imediatamente. Usa asyncio.create_task para garantir execução
+    independente do ciclo de vida da requisição HTTP.
     """
     keys: List[str] = []
 
@@ -56,6 +58,7 @@ async def extrair_pauta(req: ExtrairRequest, background_tasks: BackgroundTasks):
             _key = key
 
             async def _run(vara_id=_vara_id, data=_data, key=_key):
+                logger.warning(f"Job {key}: iniciando extração ({vara_nome} / {data})")
                 try:
                     result = await run_extraction(vara_id, data)
                     _jobs[key] = {
@@ -67,8 +70,9 @@ async def extrair_pauta(req: ExtrairRequest, background_tasks: BackgroundTasks):
                         "errors": result.get("errors", []),
                         "finished_at": datetime.now(timezone.utc).isoformat(),
                     }
+                    logger.warning(f"Job {key}: concluído — {result}")
                 except Exception as e:
-                    logger.error(f"Job {key} falhou: {e}")
+                    logger.error(f"Job {key} falhou: {e}", exc_info=True)
                     _jobs[key] = {
                         **_jobs[key],
                         "status": "error",
@@ -76,7 +80,7 @@ async def extrair_pauta(req: ExtrairRequest, background_tasks: BackgroundTasks):
                         "finished_at": datetime.now(timezone.utc).isoformat(),
                     }
 
-            background_tasks.add_task(_run)
+            asyncio.create_task(_run())
 
     # Limitar tamanho do histórico
     if len(_jobs) > _MAX_JOBS:
