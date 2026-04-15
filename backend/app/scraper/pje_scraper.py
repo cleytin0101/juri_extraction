@@ -295,13 +295,21 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
         await _screenshot(page, "debug_02_vara_erro.png")
         return []
 
-    # Preencher data — input[type="date"] com formato ISO (Angular Material datepicker)
+    # Preencher data — Angular Material datepicker usa type="text" com locale pt-BR (DD/MM/YYYY)
+    # press_sequentially dispara os eventos de input que o Angular monitora (fill() não funciona)
     try:
-        date_input = page.locator("input[type='date'], input[matdatepickerinput]").first
-        await date_input.wait_for(state="visible", timeout=5000)
-        await date_input.fill(data_audiencia.strftime("%Y-%m-%d"))
+        date_input = page.locator(
+            "input[type='date'], "
+            "input[matdatepickerinput], "
+            "input[matinput]:not([role='combobox']), "
+            "mat-form-field:nth-of-type(2) input"
+        ).first
+        await date_input.wait_for(state="visible", timeout=8000)
+        await date_input.click()
+        await page.keyboard.press("Control+a")
+        await date_input.press_sequentially(data_audiencia.strftime("%d%m%Y"))
         await page.keyboard.press("Tab")
-        logger.info(f"Data preenchida: {data_audiencia.strftime('%Y-%m-%d')}")
+        logger.warning(f"Data preenchida: {data_audiencia.strftime('%d/%m/%Y')}")
         await _screenshot(page, "debug_03_data_preenchida.png")
     except Exception as e:
         logger.warning(f"Erro ao preencher data: {e}")
