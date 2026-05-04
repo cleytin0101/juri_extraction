@@ -170,7 +170,11 @@ async def _process_single(sb, pauta_id: str, proc_data: dict) -> str:
         "enriched_at": datetime.now(timezone.utc).isoformat() if enrichment else None,
     }
 
-    empresa_result = sb.table("empresas").insert(empresa_row).execute()
+    empresa_result = (
+        sb.table("empresas")
+        .upsert(empresa_row, on_conflict="cnpj")
+        .execute()
+    )
     empresa_id = empresa_result.data[0]["id"]
 
     sb.table("leads").insert({

@@ -215,7 +215,7 @@ async def scrape_pauta(vara_nome: str, data_audiencia: date, cpf: str = "", senh
                         # que já foram extraídos da tabela com valores não-vazios
                         merged = dict(aud)
                         for k, v in detalhe.items():
-                            if v is not None and v != "" and v != []:
+                            if v is not None and v != "" and v != [] and not merged.get(k):
                                 merged[k] = v
                         processos.append(merged)
                     else:
@@ -307,7 +307,7 @@ async def _scrape_lista_pautas(page: Page, vara_nome: str, data_audiencia: date)
         await date_input.wait_for(state="visible", timeout=8000)
         await date_input.click()
         await page.keyboard.press("Control+a")
-        await date_input.press_sequentially(data_audiencia.strftime("%d%m%Y"))
+        await date_input.press_sequentially(data_audiencia.strftime("%d/%m/%Y"))
         await page.keyboard.press("Tab")
         logger.warning(f"Data preenchida: {data_audiencia.strftime('%d/%m/%Y')}")
         await _screenshot(page, "debug_03_data_preenchida.png")
@@ -799,26 +799,9 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
                 logger.warning(f"CAPTCHA não resolvido (tentativa {tentativa})")
                 continue
 
-            # Preencher resposta
-            captcha_input = page.locator(SELECTORS["captcha_input"])
-            await captcha_input.fill(resposta)
-
-            # Enviar
-            await page.get_by_text("ENVIAR").click()
-            await page.wait_for_load_state("domcontentloaded", timeout=10000)
-            await asyncio.sleep(1)
-
-            # Verificar se CAPTCHA foi aceito (página mudou)
-            if await captcha_img.count() > 0:
-                logger.warning(f"CAPTCHA incorreto (tentativa {tentativa}), tentando novamente...")
-                # Recarregar para novo CAPTCHA
-                await page.reload(wait_until="domcontentloaded")
-                await asyncio.sleep(1)
-                captcha_img = page.locator(SELECTORS["captcha_img"])
-                continue
-
-            # CAPTCHA aceito — interceptar XHR que a página Angular carrega
-            logger.warning(f"CAPTCHA aceito (tentativa {tentativa}) — aguardando XHR do detalhe")
+            # Registrar listener XHR ANTES de enviar o CAPTCHA —
+            # o Angular dispara as requests imediatamente após aceitar o CAPTCHA,
+            # e registrar depois já perderia as respostas.
             detalhe_xhr: list = []
 
             async def _on_detalhe_xhr(resp):
@@ -833,6 +816,28 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
                             pass
 
             page.on("response", _on_detalhe_xhr)
+
+            # Preencher resposta
+            captcha_input = page.locator(SELECTORS["captcha_input"])
+            await captcha_input.fill(resposta)
+
+            # Enviar
+            await page.get_by_text("ENVIAR").click()
+            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            await asyncio.sleep(1)
+
+            # Verificar se CAPTCHA foi aceito (página mudou)
+            if await captcha_img.count() > 0:
+                logger.warning(f"CAPTCHA incorreto (tentativa {tentativa}), tentando novamente...")
+                page.remove_listener("response", _on_detalhe_xhr)
+                # Recarregar para novo CAPTCHA
+                await page.reload(wait_until="domcontentloaded")
+                await asyncio.sleep(1)
+                captcha_img = page.locator(SELECTORS["captcha_img"])
+                continue
+
+            # CAPTCHA aceito — aguardar Angular terminar de renderizar
+            logger.warning(f"CAPTCHA aceito (tentativa {tentativa}) — aguardando XHR do detalhe")
             try:
                 await page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
@@ -871,13 +876,14 @@ async def _scrape_detalhe_processo(page: Page, numero: str, url_override: str = 
 
 async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
     """
-    Clica no botão 'Baixar processo na íntegra' e retorna os bytes do PDF baixado.
-    O download é interceptado pelo Playwright antes de tocar o disco.
-    Seletor confirmado via DevTools: <button id="btnDownloadIntegra" aria-label="Baixar processo na íntegra">
+    Clica no botão 'Baixar processo na íntegra' e retorna os bytes do PDF.
+    Estratégia primária: interceptar a resposta HTTP do PDF diretamente —
+    funciona tanto quando o botão dispara download direto quanto quando abre
+    o PDF em nova aba (window.open), caso em que expect_download não captura.
+    Fallback: expect_download convencional.
     """
     try:
-        # Aguardar Angular renderizar o botão (pode demorar após navegação pós-CAPTCHA)
-        # state="attached" = basta estar no DOM; JS click funciona mesmo sem visibilidade
+        # Aguardar Angular renderizar o botão
         try:
             await page.wait_for_selector(
                 "#btnDownloadIntegra, [aria-label='Baixar processo na íntegra']",
@@ -888,34 +894,58 @@ async def _download_processo_pdf(page: Page, numero: str) -> Optional[bytes]:
             logger.warning(f"Botão #btnDownloadIntegra NÃO apareceu no DOM em 15s para {numero}")
 
         download_btn = page.locator(SELECTORS["btn_download_integra"]).first
-
         if await download_btn.count() == 0:
             logger.warning(f"Botão #btnDownloadIntegra não encontrado para {numero}")
             return None
 
-        logger.warning(f"Clicando em #btnDownloadIntegra para {numero}")
-        async with page.expect_download(timeout=60000) as download_info:
-            # JavaScript click ignora re-renderização do Angular (DOM detachment)
+        # Estratégia 1: interceptar resposta HTTP do PDF (cobre download direto e nova aba)
+        pdf_future: asyncio.Future = asyncio.get_event_loop().create_future()
+
+        async def _capture_pdf_response(response):
+            ct = response.headers.get("content-type", "")
+            if ("pdf" in ct or "octet-stream" in ct) and not pdf_future.done():
+                try:
+                    body = await response.body()
+                    if body and len(body) > 1000:
+                        logger.warning(f"PDF interceptado via response ({len(body)} bytes): {response.url}")
+                        pdf_future.set_result(body)
+                except Exception as e:
+                    logger.warning(f"Erro ao ler body do PDF interceptado: {e}")
+
+        page.on("response", _capture_pdf_response)
+        try:
+            logger.warning(f"Clicando em #btnDownloadIntegra para {numero}")
             await page.evaluate('document.querySelector("#btnDownloadIntegra").click()')
+            pdf_bytes = await asyncio.wait_for(asyncio.shield(pdf_future), timeout=30)
+            logger.warning(f"PDF capturado via interceptação HTTP para {numero}: {len(pdf_bytes)} bytes")
+            return pdf_bytes
+        except asyncio.TimeoutError:
+            logger.warning(f"Interceptação HTTP do PDF expirou — tentando expect_download para {numero}")
+        finally:
+            page.remove_listener("response", _capture_pdf_response)
 
-        download = await download_info.value
-        # read_bytes() é SÍNCRONO — não usar await
-        path = await download.path()
-        pdf_bytes = path.read_bytes() if path else None
-
-        # Alternativa: ler do stream
-        if not pdf_bytes:
-            stream = await download.open_read_stream()
-            chunks = []
-            while True:
-                chunk = await stream.read(65536)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            pdf_bytes = b"".join(chunks) or None
-
-        logger.info(f"PDF baixado para {numero}: {len(pdf_bytes or b'')} bytes")
-        return pdf_bytes
+        # Estratégia 2: expect_download (download direto convencional)
+        try:
+            async with page.expect_download(timeout=30000) as download_info:
+                await page.evaluate('document.querySelector("#btnDownloadIntegra").click()')
+            download = await download_info.value
+            path = await download.path()
+            pdf_bytes = path.read_bytes() if path else None
+            if not pdf_bytes:
+                stream = await download.open_read_stream()
+                chunks = []
+                while True:
+                    chunk = await stream.read(65536)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                pdf_bytes = b"".join(chunks) or None
+            if pdf_bytes:
+                logger.warning(f"PDF capturado via expect_download para {numero}: {len(pdf_bytes)} bytes")
+            return pdf_bytes
+        except Exception as e:
+            logger.warning(f"expect_download também falhou para {numero}: {e}")
+            return None
 
     except Exception as e:
         logger.warning(f"Erro ao baixar PDF de {numero}: {e}")
