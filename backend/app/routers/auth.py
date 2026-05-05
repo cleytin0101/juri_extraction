@@ -191,7 +191,7 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                 await pdpj_btn.click()
 
                 # 3. Aguardar redirect para PDPJ SSO
-                await page.wait_for_url("**/sso.cloud.pje.jus.br/**", timeout=15000)
+                await page.wait_for_url("**/sso.cloud.pje.jus.br/**", timeout=30000)
                 session.mensagem = "Preenchendo CPF e senha..."
 
                 # 4. Preencher CPF

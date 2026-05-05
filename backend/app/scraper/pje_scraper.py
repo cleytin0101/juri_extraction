@@ -58,7 +58,7 @@ async def _login_pdpj(page: Page, cpf: str, senha: str) -> bool:
         await pdpj_btn.click()
 
         # Aguardar redirect para PDPJ SSO
-        await page.wait_for_url("**/sso.cloud.pje.jus.br/**", timeout=15000)
+        await page.wait_for_url("**/sso.cloud.pje.jus.br/**", timeout=30000)
         logger.info("Redirecionado para PDPJ SSO")
 
         # Preencher CPF/CNPJ
