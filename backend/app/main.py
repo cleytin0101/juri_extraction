@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,11 +9,22 @@ from .database import get_supabase, seed_varas_if_empty
 from .routers import pautas, extrair, leads, mensagem, metrics, configuracoes
 from .routers import auth, debug
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_runtime_credentials()
-    seed_varas_if_empty(get_supabase())
+    sb = get_supabase()
+    seed_varas_if_empty(sb)
+    # Limpar extrações travadas de antes do restart (OOM crash, etc.)
+    try:
+        sb.table("extracoes").update({"status": "erro"}).eq("status", "processando").execute()
+        logger.warning("Startup: extrações 'processando' marcadas como 'erro' (servidor reiniciado)")
+    except Exception as e:
+        logger.warning(f"Startup: não foi possível limpar extracoes travadas: {e}")
+    from .routers.extrair import start_watchdog
+    start_watchdog()
     scheduler.start()
     yield
     scheduler.shutdown()

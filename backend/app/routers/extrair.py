@@ -1,7 +1,8 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter
 from ..models.pauta import ExtrairRequest, ExtrairResponse, ExtrairJobStatus
@@ -13,11 +14,43 @@ router = APIRouter(prefix="/api/extrair", tags=["extrair"])
 
 # Estado em memória: key → job info (ordered insertion, Python 3.7+)
 _jobs: dict[str, dict] = {}
-_MAX_JOBS = 100  # manter só os últimos 100
+_MAX_JOBS = 100
 
 # Semáforo: limita a 1 extração simultânea para não estourar RAM no servidor
 # (cada Chromium usa ~300MB; o Render free tier tem 512MB total)
 _extraction_semaphore = asyncio.Semaphore(1)
+_semaphore_acquired_at: Optional[float] = None  # monotonic timestamp
+
+_EXTRACTION_TIMEOUT = 20 * 60   # 20 minutos — mata extração travada
+_WATCHDOG_INTERVAL = 2 * 60     # verifica a cada 2 min
+_WATCHDOG_TIMEOUT = 22 * 60     # força reset se travado há mais de 22 min
+
+
+async def _watchdog():
+    """Detecta semáforo permanentemente travado e força reset após 22 min."""
+    while True:
+        await asyncio.sleep(_WATCHDOG_INTERVAL)
+        global _semaphore_acquired_at
+        if _semaphore_acquired_at is not None:
+            elapsed = time.monotonic() - _semaphore_acquired_at
+            if elapsed > _WATCHDOG_TIMEOUT:
+                logger.error(
+                    f"Watchdog: semáforo travado há {elapsed / 60:.1f} min — forçando reset"
+                )
+                _semaphore_acquired_at = None
+                if _extraction_semaphore.locked():
+                    _extraction_semaphore.release()
+                for key, job in list(_jobs.items()):
+                    if job.get("status") == "running":
+                        _jobs[key].update({
+                            "status": "error",
+                            "mensagem": "Timeout watchdog: extração travada por mais de 22 min",
+                            "finished_at": datetime.now(timezone.utc).isoformat(),
+                        })
+
+
+def start_watchdog():
+    asyncio.create_task(_watchdog())
 
 
 @router.post("", response_model=ExtrairResponse, status_code=202)
@@ -57,7 +90,6 @@ async def extrair_pauta(req: ExtrairRequest):
             }
             keys.append(key)
 
-            # Captura de variáveis no closure
             _vara_id = vara_id
             _data = data
             _key = key
@@ -77,7 +109,8 @@ async def extrair_pauta(req: ExtrairRequest):
                 return cb
 
             async def _run(vara_id=_vara_id, data=_data, key=_key):
-                # Aguardar na fila se outro job já está rodando (1 Chromium por vez)
+                global _semaphore_acquired_at
+
                 if _extraction_semaphore.locked():
                     _jobs[key]["mensagem"] = "Na fila — aguardando extração anterior terminar..."
                     logger.info(f"Job {key}: aguardando semáforo")
@@ -85,10 +118,15 @@ async def extrair_pauta(req: ExtrairRequest):
                 async with _extraction_semaphore:
                     if key not in _jobs or _jobs[key]["status"] != "running":
                         return  # cancelado enquanto aguardava
+
+                    _semaphore_acquired_at = time.monotonic()
                     _jobs[key]["mensagem"] = "Iniciando extração..."
                     logger.warning(f"Job {key}: iniciando extração ({vara_nome} / {data})")
                     try:
-                        result = await run_extraction(vara_id, data, progress_cb=_make_progress_cb(key))
+                        result = await asyncio.wait_for(
+                            run_extraction(vara_id, data, progress_cb=_make_progress_cb(key)),
+                            timeout=_EXTRACTION_TIMEOUT,
+                        )
                         _jobs[key] = {
                             **_jobs[key],
                             "status": "done",
@@ -100,6 +138,15 @@ async def extrair_pauta(req: ExtrairRequest):
                             "finished_at": datetime.now(timezone.utc).isoformat(),
                         }
                         logger.warning(f"Job {key}: concluído — {result}")
+                    except asyncio.TimeoutError:
+                        logger.error(f"Job {key}: timeout de {_EXTRACTION_TIMEOUT // 60} min atingido")
+                        _jobs[key] = {
+                            **_jobs[key],
+                            "status": "error",
+                            "mensagem": f"Timeout: extração não concluiu em {_EXTRACTION_TIMEOUT // 60} minutos",
+                            "errors": ["TimeoutError"],
+                            "finished_at": datetime.now(timezone.utc).isoformat(),
+                        }
                     except Exception as e:
                         logger.error(f"Job {key} falhou: {e}", exc_info=True)
                         _jobs[key] = {
@@ -109,6 +156,8 @@ async def extrair_pauta(req: ExtrairRequest):
                             "errors": [str(e)],
                             "finished_at": datetime.now(timezone.utc).isoformat(),
                         }
+                    finally:
+                        _semaphore_acquired_at = None
 
             asyncio.create_task(_run())
 
@@ -119,6 +168,38 @@ async def extrair_pauta(req: ExtrairRequest):
             del _jobs[k]
 
     return ExtrairResponse(jobs_iniciados=len(keys), keys=keys)
+
+
+@router.post("/cancel")
+async def cancel_all():
+    """
+    Força cancelamento de todos os jobs em execução e reseta o semáforo.
+    Use para destravar o sistema após um crash ou travamento.
+    """
+    global _semaphore_acquired_at
+
+    cancelled = 0
+    for key, job in list(_jobs.items()):
+        if job.get("status") == "running":
+            _jobs[key].update({
+                "status": "error",
+                "mensagem": "Cancelado manualmente",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+            cancelled += 1
+
+    _semaphore_acquired_at = None
+    if _extraction_semaphore.locked():
+        _extraction_semaphore.release()
+
+    try:
+        sb = get_supabase()
+        sb.table("extracoes").update({"status": "erro"}).eq("status", "processando").execute()
+    except Exception as e:
+        logger.warning(f"Cancel: não foi possível atualizar banco: {e}")
+
+    logger.warning(f"Cancel manual: {cancelled} jobs cancelados, semáforo resetado")
+    return {"cancelled": cancelled, "semaforo_liberado": True}
 
 
 @router.get("/status", response_model=List[ExtrairJobStatus])
@@ -164,7 +245,6 @@ def get_status():
                 continue  # já está em memória (mais atualizado)
             seen_keys.add(key)
             vara_nome = (row.get("varas") or {}).get("nome") or row["vara_id"]
-            # Mapear status do banco para o padrão do frontend
             status_map = {"processando": "running", "concluido": "done", "erro": "error"}
             status = status_map.get(row.get("status", ""), row.get("status", "error"))
             errors_raw = row.get("errors") or []

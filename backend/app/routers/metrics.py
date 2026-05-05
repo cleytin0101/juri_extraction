@@ -46,8 +46,15 @@ def get_metrics():
     aud_total = sb.table("processos").select("id", count="exact").execute()
     audiencias_encontradas = aud_total.count or 0
 
-    # Valor total em jogo
-    valor_result = sb.table("processos").select("valor_causa").execute()
+    # Valor total em jogo (últimos 1000 processos para evitar query pesada)
+    valor_result = (
+        sb.table("processos")
+        .select("valor_causa")
+        .not_.is_("valor_causa", "null")
+        .order("data_audiencia", desc=True)
+        .limit(1000)
+        .execute()
+    )
     valor_total = sum(
         (r.get("valor_causa") or 0) for r in (valor_result.data or [])
     )
@@ -56,11 +63,12 @@ def get_metrics():
     # audiências → com telefone → enviados → respondidos → convertidos
     tel_result = (
         sb.table("empresas")
-        .select("telefones")
+        .select("id", count="exact")
         .not_.is_("telefones", "null")
+        .limit(1)
         .execute()
     )
-    telefones_count = sum(1 for r in (tel_result.data or []) if r.get("telefones"))
+    telefones_count = tel_result.count or 0
 
     enviados = (
         sb.table("leads")
@@ -123,8 +131,14 @@ def get_metrics():
             unica=counts["unica"],
         ))
 
-    # Tipos de audiência
-    tipos_result = sb.table("processos").select("tipo_audiencia").execute()
+    # Tipos de audiência (últimos 500 para evitar query pesada)
+    tipos_result = (
+        sb.table("processos")
+        .select("tipo_audiencia")
+        .order("data_audiencia", desc=True)
+        .limit(500)
+        .execute()
+    )
     tipo_counter: Counter = Counter()
     for p in (tipos_result.data or []):
         tipo_counter[p.get("tipo_audiencia", "outra")] += 1
