@@ -15,6 +15,10 @@ router = APIRouter(prefix="/api/extrair", tags=["extrair"])
 _jobs: dict[str, dict] = {}
 _MAX_JOBS = 100  # manter só os últimos 100
 
+# Semáforo: limita a 1 extração simultânea para não estourar RAM no servidor
+# (cada Chromium usa ~300MB; o Render free tier tem 512MB total)
+_extraction_semaphore = asyncio.Semaphore(1)
+
 
 @router.post("", response_model=ExtrairResponse, status_code=202)
 async def extrair_pauta(req: ExtrairRequest):
@@ -73,29 +77,38 @@ async def extrair_pauta(req: ExtrairRequest):
                 return cb
 
             async def _run(vara_id=_vara_id, data=_data, key=_key):
-                logger.warning(f"Job {key}: iniciando extração ({vara_nome} / {data})")
-                try:
-                    result = await run_extraction(vara_id, data, progress_cb=_make_progress_cb(key))
-                    _jobs[key] = {
-                        **_jobs[key],
-                        "status": "done",
-                        "mensagem": f"Concluído: {result.get('leads_criados', 0)} leads criados",
-                        "processos_encontrados": result.get("processos_encontrados", 0),
-                        "leads_criados": result.get("leads_criados", 0),
-                        "processos_com_advogado": result.get("processos_com_advogado", 0),
-                        "errors": result.get("errors", []),
-                        "finished_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                    logger.warning(f"Job {key}: concluído — {result}")
-                except Exception as e:
-                    logger.error(f"Job {key} falhou: {e}", exc_info=True)
-                    _jobs[key] = {
-                        **_jobs[key],
-                        "status": "error",
-                        "mensagem": f"Erro: {str(e)[:100]}",
-                        "errors": [str(e)],
-                        "finished_at": datetime.now(timezone.utc).isoformat(),
-                    }
+                # Aguardar na fila se outro job já está rodando (1 Chromium por vez)
+                if _extraction_semaphore.locked():
+                    _jobs[key]["mensagem"] = "Na fila — aguardando extração anterior terminar..."
+                    logger.info(f"Job {key}: aguardando semáforo")
+
+                async with _extraction_semaphore:
+                    if key not in _jobs or _jobs[key]["status"] != "running":
+                        return  # cancelado enquanto aguardava
+                    _jobs[key]["mensagem"] = "Iniciando extração..."
+                    logger.warning(f"Job {key}: iniciando extração ({vara_nome} / {data})")
+                    try:
+                        result = await run_extraction(vara_id, data, progress_cb=_make_progress_cb(key))
+                        _jobs[key] = {
+                            **_jobs[key],
+                            "status": "done",
+                            "mensagem": f"Concluído: {result.get('leads_criados', 0)} leads criados",
+                            "processos_encontrados": result.get("processos_encontrados", 0),
+                            "leads_criados": result.get("leads_criados", 0),
+                            "processos_com_advogado": result.get("processos_com_advogado", 0),
+                            "errors": result.get("errors", []),
+                            "finished_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        logger.warning(f"Job {key}: concluído — {result}")
+                    except Exception as e:
+                        logger.error(f"Job {key} falhou: {e}", exc_info=True)
+                        _jobs[key] = {
+                            **_jobs[key],
+                            "status": "error",
+                            "mensagem": f"Erro: {str(e)[:100]}",
+                            "errors": [str(e)],
+                            "finished_at": datetime.now(timezone.utc).isoformat(),
+                        }
 
             asyncio.create_task(_run())
 
