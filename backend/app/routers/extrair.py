@@ -48,6 +48,7 @@ async def extrair_pauta(req: ExtrairRequest):
                 "leads_criados": 0,
                 "processos_com_advogado": 0,
                 "errors": [],
+                "mensagem": "Iniciando extração...",
                 "started_at": datetime.now(timezone.utc).isoformat(),
             }
             keys.append(key)
@@ -57,13 +58,28 @@ async def extrair_pauta(req: ExtrairRequest):
             _data = data
             _key = key
 
+            def _make_progress_cb(k: str):
+                def cb(msg: str, processos: int = None, leads: int = None, com_adv: int = None):
+                    if k not in _jobs:
+                        return
+                    update = {"mensagem": msg}
+                    if processos is not None:
+                        update["processos_encontrados"] = processos
+                    if leads is not None:
+                        update["leads_criados"] = leads
+                    if com_adv is not None:
+                        update["processos_com_advogado"] = com_adv
+                    _jobs[k].update(update)
+                return cb
+
             async def _run(vara_id=_vara_id, data=_data, key=_key):
                 logger.warning(f"Job {key}: iniciando extração ({vara_nome} / {data})")
                 try:
-                    result = await run_extraction(vara_id, data)
+                    result = await run_extraction(vara_id, data, progress_cb=_make_progress_cb(key))
                     _jobs[key] = {
                         **_jobs[key],
                         "status": "done",
+                        "mensagem": f"Concluído: {result.get('leads_criados', 0)} leads criados",
                         "processos_encontrados": result.get("processos_encontrados", 0),
                         "leads_criados": result.get("leads_criados", 0),
                         "processos_com_advogado": result.get("processos_com_advogado", 0),
@@ -76,6 +92,7 @@ async def extrair_pauta(req: ExtrairRequest):
                     _jobs[key] = {
                         **_jobs[key],
                         "status": "error",
+                        "mensagem": f"Erro: {str(e)[:100]}",
                         "errors": [str(e)],
                         "finished_at": datetime.now(timezone.utc).isoformat(),
                     }
@@ -115,6 +132,7 @@ def get_status():
             leads_criados=j.get("leads_criados", 0),
             processos_com_advogado=j.get("processos_com_advogado", 0),
             errors=j.get("errors", []),
+            mensagem=j.get("mensagem", ""),
         ))
 
     # 2) Histórico do banco (sobrevive restarts)

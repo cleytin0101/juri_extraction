@@ -167,11 +167,27 @@ export function Dashboard() {
 
                     <div className="flex items-center gap-6 shrink-0 ml-4 text-xs">
                       {job.status === "running" ? (
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-24 bg-surface-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-accent-blue animate-progress w-2/3"></div>
+                        <div className="flex items-center gap-3">
+                          {job.processos_encontrados > 0 && (
+                            <div className="flex items-center gap-3 text-slate-400">
+                              <div className="flex flex-col items-end">
+                                <span className="text-white font-bold">{job.processos_encontrados}</span>
+                                <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Proc.</span>
+                              </div>
+                              <div className="flex flex-col items-end">
+                                <span className="text-accent-green font-bold">{job.leads_criados}</span>
+                                <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Leads</span>
+                              </div>
+                            </div>
+                          )}
+                          <div className="flex flex-col items-end max-w-[180px]">
+                            <div className="h-1.5 w-20 bg-surface-700 rounded-full overflow-hidden mb-1">
+                              <div className="h-full bg-accent-blue animate-progress w-2/3"></div>
+                            </div>
+                            <span className="text-accent-blue font-medium animate-pulse text-[10px] truncate w-full text-right">
+                              {job.mensagem || "Em andamento..."}
+                            </span>
                           </div>
-                          <span className="text-accent-blue font-semibold animate-pulse">Em andamento...</span>
                         </div>
                       ) : job.status === "error" ? (
                         <span className="text-accent-red font-semibold bg-accent-red/10 px-2 py-1 rounded">

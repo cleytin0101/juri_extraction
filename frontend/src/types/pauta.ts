@@ -29,4 +29,5 @@ export interface ExtrairJobStatus {
   leads_criados: number;
   processos_com_advogado: number;
   errors: string[];
+  mensagem?: string;
 }

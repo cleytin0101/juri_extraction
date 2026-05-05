@@ -12,7 +12,7 @@ from .storage_service import upload_pdf, pdf_expires_at
 logger = logging.getLogger(__name__)
 
 
-async def run_extraction(vara_id: str, data_audiencia: date) -> dict:
+async def run_extraction(vara_id: str, data_audiencia: date, progress_cb=None) -> dict:
     """
     Orquestra o pipeline completo:
     scraper → parser → enricher (CNPJ.ws) → inserções no Supabase
@@ -79,15 +79,37 @@ async def run_extraction(vara_id: str, data_audiencia: date) -> dict:
 
     processos_encontrados = len(processos_raw)
     logger.info(f"{processos_encontrados} processos encontrados")
+    if progress_cb:
+        progress_cb(f"Pauta obtida: {processos_encontrados} processos", processos=processos_encontrados)
 
     # Processar cada processo
-    for proc_data in processos_raw:
+    for i, proc_data in enumerate(processos_raw):
+        numero = proc_data.get("numero_processo", "?")
+        if progress_cb:
+            progress_cb(
+                f"Analisando {i+1}/{processos_encontrados}: {numero}",
+                processos=processos_encontrados,
+                leads=leads_criados,
+                com_adv=processos_com_advogado,
+            )
         try:
             result = await _process_single(sb, pauta_id, proc_data)
             if result == "lead_criado":
                 leads_criados += 1
+                if progress_cb:
+                    progress_cb(
+                        f"Lead criado! {i+1}/{processos_encontrados}: {numero}",
+                        leads=leads_criados,
+                        com_adv=processos_com_advogado,
+                    )
             elif result == "tem_advogado":
                 processos_com_advogado += 1
+                if progress_cb:
+                    progress_cb(
+                        f"Tem advogado, pulando {i+1}/{processos_encontrados}: {numero}",
+                        leads=leads_criados,
+                        com_adv=processos_com_advogado,
+                    )
         except Exception as e:
             num = proc_data.get("numero_processo", "?")
             errors.append(f"Processo {num}: {str(e)}")

@@ -24,6 +24,7 @@ class ExtrairJobStatus(BaseModel):
     leads_criados: int = 0
     processos_com_advogado: int = 0
     errors: List[str] = []
+    mensagem: str = ""
 
 
 class ExtrairResponse(BaseModel):
