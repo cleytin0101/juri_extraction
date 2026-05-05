@@ -189,16 +189,19 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                     )
                     raise
                 await pdpj_btn.click()
+                logger.info(f"Botão PDPJ clicado — URL atual: {page.url}")
 
-                # 3. Aguardar redirect para PDPJ SSO
-                await page.wait_for_url("**/sso.cloud.pje.jus.br/**", timeout=30000)
-                session.mensagem = "Preenchendo CPF e senha..."
-
-                # 4. Preencher CPF
+                # 3. Aguardar formulário do SSO aparecer (mais robusto que esperar URL específica,
+                #    pois o padrão glob **/sso.../** falha se o redirect for para a raiz do domínio)
+                session.mensagem = "Aguardando portal PDPJ SSO..."
                 cpf_input = page.locator(
                     "input[placeholder*='000'], input#username, input[name='username']"
                 ).first
-                await cpf_input.wait_for(timeout=8000)
+                await cpf_input.wait_for(timeout=45000)
+                logger.info(f"Formulário SSO detectado — URL atual: {page.url}")
+                session.mensagem = "Preenchendo CPF e senha..."
+
+                # 4. Preencher CPF
                 await cpf_input.fill(cpf)
 
                 # 5. Preencher senha
