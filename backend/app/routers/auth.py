@@ -197,21 +197,45 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                 logger.info(f"URL 3s após clicar PDPJ: {url_pos_click}")
                 session.mensagem = f"Aguardando SSO... (URL: {url_pos_click[:80]})"
 
-                # Aguardar formulário do SSO aparecer
+                # Aguardar formulário do SSO aparecer — seletor amplo para cobrir
+                # variações do tema Keycloak do PDPJ (CPF, username, text genérico)
                 cpf_input = page.locator(
-                    "input[placeholder*='000'], input#username, input[name='username']"
+                    "input#username, "
+                    "input[name='username'], "
+                    "input[name='cpf'], "
+                    "input[id*='cpf'], "
+                    "input[placeholder*='CPF'], "
+                    "input[placeholder*='cpf'], "
+                    "input[placeholder*='000'], "
+                    "input[placeholder*='Digite'], "
+                    "input[type='text']"
                 ).first
                 try:
-                    await cpf_input.wait_for(timeout=42000)
+                    await cpf_input.wait_for(timeout=20000)
                 except Exception:
+                    # Capturar HTML da página para diagnóstico
                     url_final = page.url
-                    logger.error(f"SSO não carregou. URL pós-click: {url_pos_click} | URL final: {url_final}")
-                    raise Exception(
-                        f"SSO não carregou após 45s. "
-                        f"URL pós-click: {url_pos_click} | "
-                        f"URL final: {url_final} | "
-                        f"Possível bloqueio de IP (servidor estrangeiro)"
-                    )
+                    try:
+                        body_html = await page.inner_html("body")
+                        inputs_info = await page.evaluate(
+                            "() => [...document.querySelectorAll('input')].map(i => "
+                            "({id: i.id, name: i.name, type: i.type, placeholder: i.placeholder}))"
+                        )
+                        logger.error(
+                            f"Inputs encontrados na página SSO: {inputs_info[:5]}\n"
+                            f"HTML (primeiros 1000 chars): {body_html[:1000]}"
+                        )
+                        raise Exception(
+                            f"Formulário SSO não encontrado após 20s. "
+                            f"URL: {url_final} | "
+                            f"Inputs na página: {str(inputs_info[:3])}"
+                        )
+                    except Exception as inner:
+                        raise Exception(
+                            f"Formulário SSO não encontrado após 20s. "
+                            f"URL pós-click: {url_pos_click} | URL final: {url_final} | "
+                            f"Erro ao inspecionar página: {str(inner)[:200]}"
+                        )
                 logger.info(f"Formulário SSO detectado — URL atual: {page.url}")
                 session.mensagem = "Preenchendo CPF e senha..."
 
