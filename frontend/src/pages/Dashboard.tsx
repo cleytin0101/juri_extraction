@@ -134,70 +134,89 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Extrações Recentes */}
-        {jobs && jobs.length > 0 && (
-          <div className="bg-surface-800/40 border border-white/5 rounded-2xl p-8 shadow-xl">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-white font-bold text-lg">Extrações Recentes</h3>
-                <p className="text-xs text-slate-500 mt-1">Status das últimas pautas processadas pelo agente</p>
-              </div>
-              <button className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors">Ver histórico completo</button>
+        {/* Extrações Recentes — sempre visível */}
+        <div className="bg-surface-800/40 border border-white/5 rounded-2xl p-8 shadow-xl">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-white font-bold text-lg">Extrações Recentes</h3>
+              <p className="text-xs text-slate-500 mt-1">Status das últimas pautas processadas — persiste mesmo após reinício do servidor</p>
             </div>
-            
+          </div>
+
+          {(!jobs || jobs.length === 0) ? (
+            <p className="text-slate-500 text-sm text-center py-6">Nenhuma extração registrada ainda. Acesse "Extrair Pauta" para começar.</p>
+          ) : (
             <div className="space-y-3">
               {jobs.map((job) => (
-                <div
-                  key={job.key}
-                  className="group flex items-center justify-between bg-white/5 hover:bg-white/10 border border-transparent hover:border-white/10 rounded-xl px-5 py-4 transition-all duration-200"
-                >
-                  <div className="flex items-center gap-4 min-w-0">
-                    <div className={cn(
-                      "p-2 rounded-lg",
-                      job.status === "done" ? "bg-accent-green/10" : job.status === "running" ? "bg-accent-blue/10" : "bg-accent-red/10"
-                    )}>
-                      <JobStatusIcon status={job.status} />
-                    </div>
-                    <div>
-                      <span className="text-sm font-medium text-white block truncate">{job.vara_nome || job.vara_id}</span>
-                      <span className="text-xs text-slate-500 font-mono mt-0.5">{job.data}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-6 shrink-0 ml-4 text-xs">
-                    {job.status === "running" ? (
-                      <div className="flex items-center gap-2">
-                        <div className="h-1.5 w-24 bg-surface-700 rounded-full overflow-hidden">
-                          <div className="h-full bg-accent-blue animate-progress w-2/3"></div>
-                        </div>
-                        <span className="text-accent-blue font-semibold animate-pulse">Em andamento...</span>
+                <div key={job.key}>
+                  <div
+                    className="group flex items-center justify-between bg-white/5 hover:bg-white/10 border border-transparent hover:border-white/10 rounded-xl px-5 py-4 transition-all duration-200"
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className={cn(
+                        "p-2 rounded-lg",
+                        job.status === "done" ? "bg-accent-green/10" : job.status === "running" ? "bg-accent-blue/10" : "bg-accent-red/10"
+                      )}>
+                        <JobStatusIcon status={job.status} />
                       </div>
-                    ) : job.status === "error" ? (
-                      <span className="text-accent-red font-semibold bg-accent-red/10 px-2 py-1 rounded">Erro no processamento</span>
-                    ) : (
-                      <div className="flex items-center gap-6">
-                        <div className="flex flex-col items-end">
-                          <span className="text-white font-bold">{job.processos_encontrados}</span>
-                          <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Processos</span>
-                        </div>
-                        <div className="flex flex-col items-end">
-                          <span className="text-white font-bold">{job.leads_criados}</span>
-                          <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Leads</span>
-                        </div>
-                        {job.processos_com_advogado > 0 && (
-                          <div className="flex flex-col items-end">
-                            <span className="text-red-400 font-bold">{job.processos_com_advogado}</span>
-                            <span className="text-[10px] text-red-400/50 uppercase tracking-tighter">C/ Adv.</span>
+                      <div>
+                        <span className="text-sm font-medium text-white block truncate">{job.vara_nome || job.vara_id}</span>
+                        <span className="text-xs text-slate-500 font-mono mt-0.5">{String(job.data)}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-6 shrink-0 ml-4 text-xs">
+                      {job.status === "running" ? (
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 w-24 bg-surface-700 rounded-full overflow-hidden">
+                            <div className="h-full bg-accent-blue animate-progress w-2/3"></div>
                           </div>
-                        )}
-                      </div>
-                    )}
+                          <span className="text-accent-blue font-semibold animate-pulse">Em andamento...</span>
+                        </div>
+                      ) : job.status === "error" ? (
+                        <span className="text-accent-red font-semibold bg-accent-red/10 px-2 py-1 rounded">
+                          Falhou — ver detalhes ↓
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-6">
+                          <div className="flex flex-col items-end">
+                            <span className="text-white font-bold">{job.processos_encontrados}</span>
+                            <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Processos</span>
+                          </div>
+                          <div className="flex flex-col items-end">
+                            <span className="text-white font-bold">{job.leads_criados}</span>
+                            <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Leads</span>
+                          </div>
+                          {job.processos_com_advogado > 0 && (
+                            <div className="flex flex-col items-end">
+                              <span className="text-red-400 font-bold">{job.processos_com_advogado}</span>
+                              <span className="text-[10px] text-red-400/50 uppercase tracking-tighter">C/ Adv.</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Erros explícitos — mostrar mensagem real do backend */}
+                  {job.errors && job.errors.length > 0 && (
+                    <div className="mt-1 ml-2 mr-2 bg-red-950/40 border border-red-800/30 rounded-lg px-4 py-3 space-y-1">
+                      <p className="text-[10px] text-red-400 font-semibold uppercase tracking-wide mb-1">
+                        {job.errors.length} erro(s) registrado(s):
+                      </p>
+                      {job.errors.slice(0, 5).map((err, i) => (
+                        <p key={i} className="text-xs text-red-300 font-mono break-all">• {err}</p>
+                      ))}
+                      {job.errors.length > 5 && (
+                        <p className="text-[10px] text-red-400/60">+{job.errors.length - 5} erro(s) adicionais</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Tabela de leads */}
         <div className="bg-surface-800/40 border border-white/5 rounded-2xl p-8 shadow-xl">

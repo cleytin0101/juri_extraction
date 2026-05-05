@@ -16,11 +16,14 @@ async def run_extraction(vara_id: str, data_audiencia: date) -> dict:
     """
     Orquestra o pipeline completo:
     scraper → parser → enricher (CNPJ.ws) → inserções no Supabase
+    Persiste estado em extracoes para sobreviver restarts do servidor.
     """
     sb = get_supabase()
     errors: List[str] = []
     processos_encontrados = 0
     leads_criados = 0
+    processos_com_advogado = 0
+    extracao_id = None
 
     # Buscar dados da vara
     vara_result = sb.table("varas").select("*").eq("id", vara_id).single().execute()
@@ -30,6 +33,37 @@ async def run_extraction(vara_id: str, data_audiencia: date) -> dict:
     vara = vara_result.data
     vara_nome = vara["nome"]
 
+    # Registrar início no banco (persiste mesmo se servidor reiniciar)
+    try:
+        ext_result = sb.table("extracoes").insert({
+            "vara_id": vara_id,
+            "data_pauta": data_audiencia.isoformat(),
+            "status": "processando",
+            "processos_encontrados": 0,
+            "leads_criados": 0,
+            "processos_com_advogado": 0,
+            "errors": [],
+        }).execute()
+        extracao_id = ext_result.data[0]["id"] if ext_result.data else None
+    except Exception as e:
+        logger.warning(f"Não foi possível registrar extração no banco: {e}")
+
+    def _update_extracao(status: str, extra: dict = {}):
+        if not extracao_id:
+            return
+        try:
+            sb.table("extracoes").update({
+                "status": status,
+                "processos_encontrados": processos_encontrados,
+                "leads_criados": leads_criados,
+                "processos_com_advogado": processos_com_advogado,
+                "errors": errors,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                **extra,
+            }).eq("id", extracao_id).execute()
+        except Exception as e:
+            logger.warning(f"Não foi possível atualizar extração {extracao_id}: {e}")
+
     # Criar ou recuperar registro de pauta
     pauta_id = _upsert_pauta(sb, vara_id, data_audiencia)
 
@@ -38,15 +72,13 @@ async def run_extraction(vara_id: str, data_audiencia: date) -> dict:
     try:
         processos_raw = await scrape_pauta(vara_nome, data_audiencia, cpf=settings.pje_cpf, senha=settings.pje_senha)
     except Exception as e:
-        errors.append(f"Erro no scraping: {e}")
+        errors.append(f"Erro no scraping: {str(e)}")
         logger.error(f"Scraping falhou: {e}")
-        return {"processos_encontrados": 0, "leads_criados": 0, "errors": errors}
+        _update_extracao("erro")
+        return {"processos_encontrados": 0, "leads_criados": 0, "processos_com_advogado": 0, "errors": errors}
 
     processos_encontrados = len(processos_raw)
     logger.info(f"{processos_encontrados} processos encontrados")
-
-    leads_criados = 0
-    processos_com_advogado = 0
 
     # Processar cada processo
     for proc_data in processos_raw:
@@ -58,11 +90,12 @@ async def run_extraction(vara_id: str, data_audiencia: date) -> dict:
                 processos_com_advogado += 1
         except Exception as e:
             num = proc_data.get("numero_processo", "?")
-            errors.append(f"Erro no processo {num}: {e}")
+            errors.append(f"Processo {num}: {str(e)}")
             logger.error(f"Erro ao processar {num}: {e}")
 
         await asyncio.sleep(0.5)
 
+    _update_extracao("concluido")
     logger.info(
         f"Extração concluída: {leads_criados} leads, "
         f"{processos_com_advogado} com advogado, {len(errors)} erros"

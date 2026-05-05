@@ -93,12 +93,20 @@ async def extrair_pauta(req: ExtrairRequest):
 
 @router.get("/status", response_model=List[ExtrairJobStatus])
 def get_status():
-    """Retorna os últimos jobs de extração (mais recente primeiro)."""
-    jobs = list(_jobs.values())
-    jobs.reverse()
-    return [
-        ExtrairJobStatus(
-            key=j["key"],
+    """
+    Retorna os últimos jobs de extração (mais recente primeiro).
+    Mescla jobs em memória (rodando agora) com histórico persistido no banco,
+    para sobreviver restarts do servidor.
+    """
+    result: List[ExtrairJobStatus] = []
+    seen_keys: set = set()
+
+    # 1) Jobs em memória (inclui os que estão rodando agora)
+    for j in reversed(list(_jobs.values())):
+        key = j["key"]
+        seen_keys.add(key)
+        result.append(ExtrairJobStatus(
+            key=key,
             vara_id=j["vara_id"],
             vara_nome=j.get("vara_nome", j["vara_id"]),
             data=j["data"],
@@ -107,6 +115,41 @@ def get_status():
             leads_criados=j.get("leads_criados", 0),
             processos_com_advogado=j.get("processos_com_advogado", 0),
             errors=j.get("errors", []),
+        ))
+
+    # 2) Histórico do banco (sobrevive restarts)
+    try:
+        sb = get_supabase()
+        rows = (
+            sb.table("extracoes")
+            .select("*, varas(nome)")
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
         )
-        for j in jobs[:20]
-    ]
+        for row in (rows.data or []):
+            key = f"{row['vara_id']}_{row['data_pauta']}"
+            if key in seen_keys:
+                continue  # já está em memória (mais atualizado)
+            seen_keys.add(key)
+            vara_nome = (row.get("varas") or {}).get("nome") or row["vara_id"]
+            # Mapear status do banco para o padrão do frontend
+            status_map = {"processando": "running", "concluido": "done", "erro": "error"}
+            status = status_map.get(row.get("status", ""), row.get("status", "error"))
+            errors_raw = row.get("errors") or []
+            errors = [str(e) for e in errors_raw]
+            result.append(ExtrairJobStatus(
+                key=key,
+                vara_id=row["vara_id"],
+                vara_nome=vara_nome,
+                data=row["data_pauta"],
+                status=status,
+                processos_encontrados=row.get("processos_encontrados") or 0,
+                leads_criados=row.get("leads_criados") or 0,
+                processos_com_advogado=row.get("processos_com_advogado") or 0,
+                errors=errors,
+            ))
+    except Exception as e:
+        logger.warning(f"Não foi possível carregar histórico de extracoes do banco: {e}")
+
+    return result[:30]
