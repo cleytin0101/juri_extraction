@@ -197,45 +197,53 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                 logger.info(f"URL 3s após clicar PDPJ: {url_pos_click}")
                 session.mensagem = f"Aguardando SSO... (URL: {url_pos_click[:80]})"
 
-                # Aguardar formulário do SSO aparecer — seletor amplo para cobrir
-                # variações do tema Keycloak do PDPJ (CPF, username, text genérico)
-                cpf_input = page.locator(
-                    "input#username, "
-                    "input[name='username'], "
-                    "input[name='cpf'], "
-                    "input[id*='cpf'], "
-                    "input[placeholder*='CPF'], "
-                    "input[placeholder*='cpf'], "
-                    "input[placeholder*='000'], "
-                    "input[placeholder*='Digite'], "
-                    "input[type='text']"
-                ).first
+                # Verificar se há tela de seleção de método de login (IDP selector do Keycloak PDPJ)
+                # O PDPJ SSO pode mostrar opções como "Entrar com CPF e Senha" / "Certificado Digital"
+                # antes de exibir o formulário com os campos de input.
+                session.mensagem = "Verificando método de login SSO..."
                 try:
-                    await cpf_input.wait_for(timeout=20000)
+                    cpf_method_btn = page.locator(
+                        "a:has-text('CPF'), button:has-text('CPF'), "
+                        "a:has-text('Senha'), a:has-text('senha'), "
+                        "a[href*='cpf'], a[id*='cpf'], [class*='cpf']"
+                    ).first
+                    if await cpf_method_btn.is_visible():
+                        session.mensagem = "Selecionando login por CPF e Senha..."
+                        await cpf_method_btn.click()
+                        await asyncio.sleep(2)
+                        logger.info(f"Clicou no método CPF — URL: {page.url}")
                 except Exception:
-                    # Capturar HTML da página para diagnóstico
+                    pass  # sem tela de seleção, continuar direto
+
+                # Aguardar campo CPF/username aparecer (seletor amplo)
+                cpf_input = page.locator(
+                    "input#username, input[name='username'], input[name='cpf'], "
+                    "input[id*='cpf'], input[placeholder*='CPF'], input[placeholder*='cpf'], "
+                    "input[placeholder*='000'], input[type='text']"
+                ).first
+                error_msg = f"Campo CPF não encontrado após 30s. URL: {url_pos_click}"
+                try:
+                    await cpf_input.wait_for(timeout=30000)
+                    logger.info(f"Campo CPF encontrado — URL: {page.url}")
+                except Exception:
                     url_final = page.url
                     try:
-                        body_html = await page.inner_html("body")
-                        inputs_info = await page.evaluate(
+                        all_inputs = await page.evaluate(
                             "() => [...document.querySelectorAll('input')].map(i => "
-                            "({id: i.id, name: i.name, type: i.type, placeholder: i.placeholder}))"
+                            "({id:i.id, name:i.name, type:i.type, placeholder:i.placeholder}))"
                         )
-                        logger.error(
-                            f"Inputs encontrados na página SSO: {inputs_info[:5]}\n"
-                            f"HTML (primeiros 1000 chars): {body_html[:1000]}"
+                        page_text = await page.evaluate("() => document.body.innerText.slice(0, 400)")
+                        logger.error(f"Inputs na página: {all_inputs} | Texto: {page_text}")
+                        error_msg = (
+                            f"Campo CPF não encontrado após 30s. URL: {url_final} | "
+                            f"Inputs: {all_inputs[:4]} | Texto: {page_text[:200]}"
                         )
-                        raise Exception(
-                            f"Formulário SSO não encontrado após 20s. "
-                            f"URL: {url_final} | "
-                            f"Inputs na página: {str(inputs_info[:3])}"
+                    except Exception:
+                        error_msg = (
+                            f"Campo CPF não encontrado após 30s. "
+                            f"URL pós-click: {url_pos_click} | URL final: {url_final}"
                         )
-                    except Exception as inner:
-                        raise Exception(
-                            f"Formulário SSO não encontrado após 20s. "
-                            f"URL pós-click: {url_pos_click} | URL final: {url_final} | "
-                            f"Erro ao inspecionar página: {str(inner)[:200]}"
-                        )
+                    raise Exception(error_msg)
                 logger.info(f"Formulário SSO detectado — URL atual: {page.url}")
                 session.mensagem = "Preenchendo CPF e senha..."
 
