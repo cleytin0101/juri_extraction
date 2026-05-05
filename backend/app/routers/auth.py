@@ -191,13 +191,27 @@ async def _login_task(session: LoginSession, cpf: str, senha: str) -> None:
                 await pdpj_btn.click()
                 logger.info(f"Botão PDPJ clicado — URL atual: {page.url}")
 
-                # 3. Aguardar formulário do SSO aparecer (mais robusto que esperar URL específica,
-                #    pois o padrão glob **/sso.../** falha se o redirect for para a raiz do domínio)
-                session.mensagem = "Aguardando portal PDPJ SSO..."
+                # 3. Aguardar 3s para a navegação iniciar e capturar URL diagnóstica
+                await asyncio.sleep(3)
+                url_pos_click = page.url
+                logger.info(f"URL 3s após clicar PDPJ: {url_pos_click}")
+                session.mensagem = f"Aguardando SSO... (URL: {url_pos_click[:80]})"
+
+                # Aguardar formulário do SSO aparecer
                 cpf_input = page.locator(
                     "input[placeholder*='000'], input#username, input[name='username']"
                 ).first
-                await cpf_input.wait_for(timeout=45000)
+                try:
+                    await cpf_input.wait_for(timeout=42000)
+                except Exception:
+                    url_final = page.url
+                    logger.error(f"SSO não carregou. URL pós-click: {url_pos_click} | URL final: {url_final}")
+                    raise Exception(
+                        f"SSO não carregou após 45s. "
+                        f"URL pós-click: {url_pos_click} | "
+                        f"URL final: {url_final} | "
+                        f"Possível bloqueio de IP (servidor estrangeiro)"
+                    )
                 logger.info(f"Formulário SSO detectado — URL atual: {page.url}")
                 session.mensagem = "Preenchendo CPF e senha..."
 
