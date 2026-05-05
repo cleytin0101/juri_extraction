@@ -8,7 +8,14 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      retry: 1,
+      // axios já retenta 502/503 — aqui só retentamos erros de rede (sem resposta)
+      retry: (failureCount, error: unknown) => {
+        const status = (error as { response?: { status: number } })?.response?.status;
+        if (status === 502 || status === 503) return false;
+        return failureCount < 1;
+      },
+      // Mantém dados anteriores visíveis enquanto re-busca (server acordando)
+      placeholderData: (prev: unknown) => prev,
     },
   },
 });
