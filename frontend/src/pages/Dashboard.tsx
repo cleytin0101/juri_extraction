@@ -1,14 +1,11 @@
-import { Scale, Users, Calendar, DollarSign, Loader2, CheckCircle2, XCircle, TrendingUp, Search, Filter } from "lucide-react";
+import { Scale, Users, FileText, DollarSign, TrendingUp, Search, Filter } from "lucide-react";
 import { MetricCard } from "../components/metrics/MetricCard";
 import { FunnelChart } from "../components/metrics/FunnelChart";
 import { BarChart } from "../components/metrics/BarChart";
 import { DonutChart } from "../components/metrics/DonutChart";
 import { LeadTable } from "../components/leads/LeadTable";
 import { useMetrics } from "../hooks/useMetrics";
-import { useExtrairStatus } from "../hooks/useExtraction";
-import type { ExtrairJobStatus } from "../types/pauta";
 import { SparklesCore } from "@/components/ui/sparkles";
-import { cn } from "@/lib/utils";
 
 function fmtBRL(v: number) {
   if (v >= 1_000_000) return `R$ ${(v / 1_000_000).toFixed(1)}M`;
@@ -16,15 +13,8 @@ function fmtBRL(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 }
 
-function JobStatusIcon({ status }: { status: ExtrairJobStatus["status"] }) {
-  if (status === "running") return <Loader2 size={14} className="animate-spin text-accent-blue" />;
-  if (status === "done") return <CheckCircle2 size={14} className="text-accent-green" />;
-  return <XCircle size={14} className="text-accent-red" />;
-}
-
 export function Dashboard() {
   const { data, isLoading } = useMetrics();
-  const { data: jobs } = useExtrairStatus();
 
   return (
     <div className="min-h-screen bg-[#020617] text-white selection:bg-indigo-500/30">
@@ -72,7 +62,7 @@ export function Dashboard() {
             </div>
             <div>
               <div className="text-sm font-semibold text-white">Visão Geral do Sistema</div>
-              <div className="text-xs text-slate-400">PJe TRT-7 — Dados atualizados em tempo real</div>
+              <div className="text-xs text-slate-400">Leads gerados via upload de documentos — Dados em tempo real</div>
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs font-medium text-accent-green bg-accent-green/10 px-3 py-1 rounded-full border border-accent-green/20">
@@ -84,9 +74,9 @@ export function Dashboard() {
         {/* Métricas principais */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <MetricCard
-            label="Processos Hoje"
-            value={isLoading ? "—" : data?.processos_hoje ?? 0}
-            icon={<Calendar size={20} />}
+            label="Processos Cadastrados"
+            value={isLoading ? "—" : data?.audiencias_encontradas ?? 0}
+            icon={<FileText size={20} />}
             className="bg-surface-800/40 border-white/5 hover:border-indigo-500/50 transition-all duration-300"
           />
           <MetricCard
@@ -96,8 +86,8 @@ export function Dashboard() {
             className="bg-surface-800/40 border-white/5 hover:border-indigo-500/50 transition-all duration-300"
           />
           <MetricCard
-            label="Audiências Encontradas"
-            value={isLoading ? "—" : data?.audiencias_encontradas ?? 0}
+            label="Mensagens Enviadas"
+            value={isLoading ? "—" : (data?.funnel?.find(f => f.label === "Mensagens enviadas")?.value ?? 0)}
             icon={<Scale size={20} />}
             className="bg-surface-800/40 border-white/5 hover:border-indigo-500/50 transition-all duration-300"
           />
@@ -132,106 +122,6 @@ export function Dashboard() {
              </div>
             <DonutChart data={data?.tipos_audiencia ?? []} />
           </div>
-        </div>
-
-        {/* Extrações Recentes — sempre visível */}
-        <div className="bg-surface-800/40 border border-white/5 rounded-2xl p-8 shadow-xl">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-white font-bold text-lg">Extrações Recentes</h3>
-              <p className="text-xs text-slate-500 mt-1">Status das últimas pautas processadas — persiste mesmo após reinício do servidor</p>
-            </div>
-          </div>
-
-          {(!jobs || jobs.length === 0) ? (
-            <p className="text-slate-500 text-sm text-center py-6">Nenhuma extração registrada ainda. Acesse "Extrair Pauta" para começar.</p>
-          ) : (
-            <div className="space-y-3">
-              {jobs.map((job) => (
-                <div key={job.key}>
-                  <div
-                    className="group flex items-center justify-between bg-white/5 hover:bg-white/10 border border-transparent hover:border-white/10 rounded-xl px-5 py-4 transition-all duration-200"
-                  >
-                    <div className="flex items-center gap-4 min-w-0">
-                      <div className={cn(
-                        "p-2 rounded-lg",
-                        job.status === "done" ? "bg-accent-green/10" : job.status === "running" ? "bg-accent-blue/10" : "bg-accent-red/10"
-                      )}>
-                        <JobStatusIcon status={job.status} />
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-white block truncate">{job.vara_nome || job.vara_id}</span>
-                        <span className="text-xs text-slate-500 font-mono mt-0.5">{String(job.data)}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-6 shrink-0 ml-4 text-xs">
-                      {job.status === "running" ? (
-                        <div className="flex items-center gap-3">
-                          {job.processos_encontrados > 0 && (
-                            <div className="flex items-center gap-3 text-slate-400">
-                              <div className="flex flex-col items-end">
-                                <span className="text-white font-bold">{job.processos_encontrados}</span>
-                                <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Proc.</span>
-                              </div>
-                              <div className="flex flex-col items-end">
-                                <span className="text-accent-green font-bold">{job.leads_criados}</span>
-                                <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Leads</span>
-                              </div>
-                            </div>
-                          )}
-                          <div className="flex flex-col items-end max-w-[180px]">
-                            <div className="h-1.5 w-20 bg-surface-700 rounded-full overflow-hidden mb-1">
-                              <div className="h-full bg-accent-blue animate-progress w-2/3"></div>
-                            </div>
-                            <span className="text-accent-blue font-medium animate-pulse text-[10px] truncate w-full text-right">
-                              {job.mensagem || "Em andamento..."}
-                            </span>
-                          </div>
-                        </div>
-                      ) : job.status === "error" ? (
-                        <span className="text-accent-red font-semibold bg-accent-red/10 px-2 py-1 rounded">
-                          Falhou — ver detalhes ↓
-                        </span>
-                      ) : (
-                        <div className="flex items-center gap-6">
-                          <div className="flex flex-col items-end">
-                            <span className="text-white font-bold">{job.processos_encontrados}</span>
-                            <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Processos</span>
-                          </div>
-                          <div className="flex flex-col items-end">
-                            <span className="text-white font-bold">{job.leads_criados}</span>
-                            <span className="text-[10px] text-slate-500 uppercase tracking-tighter">Leads</span>
-                          </div>
-                          {job.processos_com_advogado > 0 && (
-                            <div className="flex flex-col items-end">
-                              <span className="text-red-400 font-bold">{job.processos_com_advogado}</span>
-                              <span className="text-[10px] text-red-400/50 uppercase tracking-tighter">C/ Adv.</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Erros explícitos — mostrar mensagem real do backend */}
-                  {job.errors && job.errors.length > 0 && (
-                    <div className="mt-1 ml-2 mr-2 bg-red-950/40 border border-red-800/30 rounded-lg px-4 py-3 space-y-1">
-                      <p className="text-[10px] text-red-400 font-semibold uppercase tracking-wide mb-1">
-                        {job.errors.length} erro(s) registrado(s):
-                      </p>
-                      {job.errors.slice(0, 5).map((err, i) => (
-                        <p key={i} className="text-xs text-red-300 font-mono break-all">• {err}</p>
-                      ))}
-                      {job.errors.length > 5 && (
-                        <p className="text-[10px] text-red-400/60">+{job.errors.length - 5} erro(s) adicionais</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Tabela de leads */}

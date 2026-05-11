@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
-import { LayoutDashboard, Download, Settings } from "lucide-react";
+import { LayoutDashboard, Upload, Settings } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
-import { ExtractionPanel } from "./pages/ExtractionPanel";
+import { UploadPanel } from "./pages/UploadPanel";
 import { Configuracoes } from "./pages/Configuracoes";
 import clsx from "clsx";
 
@@ -22,7 +22,7 @@ function Nav() {
         Dashboard
       </NavLink>
       <NavLink
-        to="/extrair"
+        to="/upload"
         className={({ isActive }) =>
           clsx(
             "flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
@@ -30,8 +30,8 @@ function Nav() {
           )
         }
       >
-        <Download size={15} />
-        Extrair Pauta
+        <Upload size={15} />
+        Upload de Documentos
       </NavLink>
       <NavLink
         to="/configuracoes"
@@ -55,7 +55,7 @@ export default function App() {
       <Nav />
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/extrair" element={<ExtractionPanel />} />
+        <Route path="/upload" element={<UploadPanel />} />
         <Route path="/configuracoes" element={<Configuracoes />} />
       </Routes>
     </BrowserRouter>
