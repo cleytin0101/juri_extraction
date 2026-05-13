@@ -152,8 +152,6 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
             "processo_id": processo_id,
             "empresa_id": empresa_id,
             "status": lead_status,
-            "lead_criado_em": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         result["lead_id"] = lead_result.data[0]["id"] if lead_result.data else None
         result["status"] = "criado"

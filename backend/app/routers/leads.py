@@ -2,6 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, HTTPException
 from ..models.lead import LeadListResponse, LeadStatusUpdate
 from ..services import lead_service
+from ..database import get_supabase
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
 
@@ -22,3 +23,10 @@ def update_status(lead_id: str, body: LeadStatusUpdate):
     if not updated:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
     return {"ok": True, "lead_id": lead_id, "status": body.status}
+
+
+@router.delete("/{lead_id}")
+def delete_lead(lead_id: str):
+    sb = get_supabase()
+    sb.table("leads").delete().eq("id", lead_id).execute()
+    return {"ok": True, "lead_id": lead_id}

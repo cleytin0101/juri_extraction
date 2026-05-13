@@ -21,3 +21,7 @@ export async function sendMensagem(leadId: string, telefone?: string) {
   });
   return data;
 }
+
+export async function deleteLead(leadId: string): Promise<void> {
+  await client.delete(`/leads/${leadId}`);
+}

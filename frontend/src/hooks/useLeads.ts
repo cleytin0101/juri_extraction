@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchLeads, updateLeadStatus, sendMensagem } from "../api/leads";
+import { fetchLeads, updateLeadStatus, sendMensagem, deleteLead } from "../api/leads";
 import type { LeadStatus } from "../types/lead";
 
 export function useLeads(status?: string, page = 1, page_size = 20) {
@@ -28,6 +28,17 @@ export function useSendMensagem() {
   return useMutation({
     mutationFn: ({ leadId, telefone }: { leadId: string; telefone?: string }) =>
       sendMensagem(leadId, telefone),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["metrics"] });
+    },
+  });
+}
+
+export function useDeleteLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (leadId: string) => deleteLead(leadId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["metrics"] });

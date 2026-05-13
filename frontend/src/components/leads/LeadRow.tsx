@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { MessageCircle, FileText, UserCheck, UserX, Phone } from "lucide-react";
+import { MessageCircle, FileText, UserCheck, UserX, Phone, Trash2, Eye } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { StatusBadge } from "./StatusBadge";
 import { SendMessageModal } from "./SendMessageModal";
+import { LeadDetailModal } from "./LeadDetailModal";
+import { useDeleteLead } from "../../hooks/useLeads";
 import type { Lead } from "../../types/lead";
 
 function fmtValor(v: number | null) {
@@ -35,13 +37,26 @@ function pdfValido(lead: Lead): boolean {
 }
 
 export function LeadRow({ lead }: { lead: Lead }) {
-  const [showModal, setShowModal] = useState(false);
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
+  const deleteMutation = useDeleteLead();
+
+  function handleDelete() {
+    if (window.confirm(`Deletar lead da empresa "${lead.empresa_nome}"?`)) {
+      deleteMutation.mutate(lead.lead_id);
+    }
+  }
 
   return (
     <>
       <tr className="border-b border-surface-600 hover:bg-surface-700/50 transition-colors">
         <td className="px-4 py-3">
-          <div className="font-medium text-white text-sm">{lead.empresa_nome}</div>
+          <button
+            onClick={() => setShowDetail(true)}
+            className="font-medium text-white text-sm hover:text-indigo-300 transition-colors text-left"
+          >
+            {lead.empresa_nome}
+          </button>
           <div className="text-gray-500 text-xs">{lead.numero_processo}</div>
           {/* Badge: tem advogado */}
           {lead.tem_advogado ? (
@@ -80,7 +95,7 @@ export function LeadRow({ lead }: { lead: Lead }) {
             </div>
           )}
         </td>
-        <td className="px-4 py-3 text-gray-300 text-sm">{fmtData(lead.data_audiencia)}</td>
+        <td className="px-4 py-3 text-gray-300 text-sm">{lead.data_audiencia ? fmtData(lead.data_audiencia) : "—"}</td>
         <td className="px-4 py-3 text-gray-300 text-sm capitalize">
           {lead.tipo_audiencia ?? "—"}
         </td>
@@ -92,6 +107,13 @@ export function LeadRow({ lead }: { lead: Lead }) {
         </td>
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowDetail(true)}
+              title="Ver detalhes"
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-white transition-colors"
+            >
+              <Eye size={13} />
+            </button>
             {pdfValido(lead) && (
               <a
                 href={lead.pdf_url!}
@@ -106,19 +128,30 @@ export function LeadRow({ lead }: { lead: Lead }) {
             )}
             {lead.status === "novo" && !lead.tem_advogado && (
               <button
-                onClick={() => setShowModal(true)}
+                onClick={() => setShowSendModal(true)}
                 className="flex items-center gap-1 text-xs text-accent-green hover:text-green-300 transition-colors"
               >
                 <MessageCircle size={13} />
                 Enviar
               </button>
             )}
+            <button
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+              title="Deletar lead"
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-400 transition-colors disabled:opacity-40"
+            >
+              <Trash2 size={13} />
+            </button>
           </div>
         </td>
       </tr>
 
-      {showModal && (
-        <SendMessageModal lead={lead} onClose={() => setShowModal(false)} />
+      {showSendModal && (
+        <SendMessageModal lead={lead} onClose={() => setShowSendModal(false)} />
+      )}
+      {showDetail && (
+        <LeadDetailModal lead={lead} onClose={() => setShowDetail(false)} />
       )}
     </>
   );

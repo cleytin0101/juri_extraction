@@ -14,7 +14,7 @@ export interface Lead {
   numero_processo: string;
   orgao_julgador: string | null;
   valor_causa: number | null;
-  data_audiencia: string;
+  data_audiencia: string | null;
   tipo_audiencia: string | null;
   resumo_caso: string | null;
   reclamante_nome: string | null;
