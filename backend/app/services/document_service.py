@@ -87,7 +87,7 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
         "numero_processo": numero,
         "orgao_julgador": parsed.get("orgao_julgador") or "",
         "valor_causa": result["valor_causa"],
-        "data_audiencia": parsed.get("data_audiencia"),
+        "data_audiencia": parsed["data_audiencia"].isoformat() if parsed.get("data_audiencia") else None,
         "resumo_caso": result["resumo_caso"],
         "reclamante_nome": result["reclamante_nome"],
         "tem_advogado": result["tem_advogado"],
