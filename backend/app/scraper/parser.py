@@ -70,21 +70,35 @@ def parse_data_audiencia(text: str) -> Optional[datetime]:
     return None
 
 
-ADVOGADO_PATTERNS = re.compile(
-    r"habilita[çc][aã]o|contesta[çc][aã]o|petição\s+de\s+habilita|peti[çc][aã]o\s+de\s+habilita",
+DATA_AUDIENCIA_REGEX = re.compile(
+    r"(?:data|audi[eê]ncia|designad[ao]|marcad[ao])\D{0,30}?(\d{2}/\d{2}/\d{4}(?:\s+\d{2}:\d{2})?)",
     re.IGNORECASE,
 )
 
 
-def check_tem_advogado(text: str) -> bool:
-    return bool(ADVOGADO_PATTERNS.search(text))
+def check_tem_advogado_reclamado(text: str) -> bool:
+    """Retorna True apenas se o RECLAMADO possui advogado — ignora advogados do RECLAMANTE."""
+    reclamado_m = re.search(r"RECLAMAD[AO][:\s]", text, re.IGNORECASE)
+    if not reclamado_m:
+        return False
+    reclamado_start = reclamado_m.start()
+    end_m = re.search(
+        r"(?:DESPACHO|DECIS[ÃA]O|SENTEN[ÇC]A|RELAT[ÓO]RIO|CONCLUS[ÃA]O|PEDIDOS|DO\s+PROCESSO)",
+        text[reclamado_start:],
+        re.IGNORECASE,
+    )
+    if end_m:
+        reclamado_section = text[reclamado_start : reclamado_start + end_m.start()]
+    else:
+        reclamado_section = text[reclamado_start : reclamado_start + 800]
+    return bool(re.search(r"ADVOGAD[AO]", reclamado_section, re.IGNORECASE))
 
 
 def parse_pdf_text(pdf_bytes: bytes) -> dict:
     """
     Extrai campos estruturados de um PDF do PJe.
     Retorna: reclamante_nome, empresa_nome, empresa_cnpj, valor_causa,
-             resumo_caso, tem_advogado, orgao_julgador.
+             resumo_caso, tem_advogado, orgao_julgador, data_audiencia.
     """
     result: dict = {
         "reclamante_nome": "",
@@ -94,6 +108,7 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
         "resumo_caso": "",
         "tem_advogado": False,
         "orgao_julgador": "",
+        "data_audiencia": None,
     }
     try:
         import pdfplumber
@@ -157,6 +172,11 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
     if resumo_m:
         result["resumo_caso"] = resumo_m.group(1).strip()[:500]
 
-    result["tem_advogado"] = check_tem_advogado(full_text)
+    # Data de audiência
+    data_m = DATA_AUDIENCIA_REGEX.search(full_text)
+    if data_m:
+        result["data_audiencia"] = parse_data_audiencia(data_m.group(1))
+
+    result["tem_advogado"] = check_tem_advogado_reclamado(full_text)
 
     return result

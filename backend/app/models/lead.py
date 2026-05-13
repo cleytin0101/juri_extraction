@@ -25,7 +25,7 @@ class Lead(BaseModel):
     numero_processo: str
     orgao_julgador: Optional[str] = None
     valor_causa: Optional[float] = None
-    data_audiencia: datetime
+    data_audiencia: Optional[datetime] = None
     tipo_audiencia: Optional[str] = None
     resumo_caso: Optional[str] = None
     reclamante_nome: Optional[str] = None

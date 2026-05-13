@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_key: str = ""
     cnpj_api_url: str = "https://publica.cnpj.ws/cnpj"
+    cnpja_api_url: str = "https://api.cnpja.com"
+    cnpja_api_key: str = ""
     whatsapp_provider: str = "mock"
     cors_origins: List[str] = ["http://localhost:5173", "https://juri-frontend.onrender.com"]
     # Dados do advogado para template WhatsApp

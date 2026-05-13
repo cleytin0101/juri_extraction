@@ -58,13 +58,16 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
         numero = m.group() if m else filename.replace(".pdf", "")
     result["numero_processo"] = numero
 
-    # Enriquecimento via CNPJ.ws — sempre, independente de ter advogado
+    # Enriquecimento — sempre, independente de ter advogado
+    # Cascata: CNPJ.ws por CNPJ → cnpja.com por CNPJ → cnpja.com por nome
     enrichment: dict = {}
-    if result["empresa_cnpj"]:
-        try:
-            enrichment = await enrich_empresa(result["empresa_cnpj"]) or {}
-        except Exception as e:
-            logger.warning(f"Enriquecimento CNPJ falhou para {result['empresa_cnpj']}: {e}")
+    try:
+        enrichment = await enrich_empresa(
+            result["empresa_cnpj"] or "",
+            nome=result["empresa_nome"] or "",
+        ) or {}
+    except Exception as e:
+        logger.warning(f"Enriquecimento falhou para {result['empresa_cnpj']}: {e}")
 
     if enrichment.get("nome") and not result["empresa_nome"]:
         result["empresa_nome"] = enrichment["nome"]
@@ -84,13 +87,13 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
         "numero_processo": numero,
         "orgao_julgador": parsed.get("orgao_julgador") or "",
         "valor_causa": result["valor_causa"],
+        "data_audiencia": parsed.get("data_audiencia"),
         "resumo_caso": result["resumo_caso"],
         "reclamante_nome": result["reclamante_nome"],
         "tem_advogado": result["tem_advogado"],
         "pdf_url": pdf_path,
         "pdf_expires_at": pdf_expires_at() if pdf_path else None,
         "raw_data": {"origem": "upload_manual", "filename": filename},
-        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
         proc_result = (
