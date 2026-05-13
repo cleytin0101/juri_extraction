@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     cnpja_api_url: str = "https://api.cnpja.com"
     cnpja_api_key: str = ""
     whatsapp_provider: str = "mock"
+    meta_phone_number_id: str = ""
+    meta_access_token: str = ""
+    meta_webhook_verify_token: str = "juri_webhook_token"
     cors_origins: List[str] = ["http://localhost:5173", "https://juri-frontend.onrender.com"]
     # Dados do advogado para template WhatsApp
     advogado_nome: str = ""

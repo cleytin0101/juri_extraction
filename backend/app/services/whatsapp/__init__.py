@@ -7,8 +7,7 @@ def get_whatsapp_provider() -> WhatsAppProvider:
     provider = settings.whatsapp_provider
     if provider == "mock":
         return MockProvider()
-    # Adicionar outros providers aqui:
-    # elif provider == "evolution":
-    #     from .evolution_provider import EvolutionProvider
-    #     return EvolutionProvider()
+    if provider == "meta_cloud":
+        from .meta_cloud_provider import MetaCloudProvider
+        return MetaCloudProvider()
     raise ValueError(f"WhatsApp provider desconhecido: '{provider}'")

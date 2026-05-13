@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .database import get_supabase
 from .routers import leads, mensagem, metrics, configuracoes, documentos
-from .routers import auth, debug
+from .routers import auth, debug, whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ app.include_router(metrics.router)
 app.include_router(configuracoes.router)
 app.include_router(auth.router)
 app.include_router(debug.router)
+app.include_router(whatsapp.router)
 
 
 @app.get("/health")
