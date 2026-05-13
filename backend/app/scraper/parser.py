@@ -75,6 +75,42 @@ DATA_AUDIENCIA_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+NOTIFICACAO_POSTAL_REGEX = re.compile(
+    r"NOTIFICA[CÇ][ÃA]O\s+POSTAL"
+    r"|CARTA\s+DE\s+INTIMA[CÇ][ÃA]O"
+    r"|INTIMA[CÇ][ÃA]O\s+POSTAL"
+    r"|AVISO\s+DE\s+RECEBIMENTO",
+    re.IGNORECASE,
+)
+
+MODALIDADE_REGEX = re.compile(
+    r"\b(presencial|online|telepresencial|videoconfer[eê]ncia|virtual)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_audiencia_from_notificacao(pages_text: list) -> dict:
+    """
+    Busca em páginas de notificação postal a data oficial da audiência.
+    Retorna dict com 'data_audiencia' e opcionalmente 'modalidade'.
+    Retorna {} se nenhuma notificação postal com data for encontrada.
+    """
+    for page in pages_text:
+        if not NOTIFICACAO_POSTAL_REGEX.search(page):
+            continue
+        data_m = DATA_AUDIENCIA_REGEX.search(page)
+        if not data_m:
+            continue
+        parsed_date = parse_data_audiencia(data_m.group(1))
+        if not parsed_date:
+            continue
+        result: dict = {"data_audiencia": parsed_date}
+        modalidade_m = MODALIDADE_REGEX.search(page)
+        if modalidade_m:
+            result["modalidade"] = modalidade_m.group(1).lower()
+        return result
+    return {}
+
 
 def check_tem_advogado_reclamado(text: str) -> bool:
     """Retorna True apenas se o RECLAMADO possui advogado — ignora advogados do RECLAMANTE."""
@@ -109,6 +145,7 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
         "tem_advogado": False,
         "orgao_julgador": "",
         "data_audiencia": None,
+        "modalidade_audiencia": None,
     }
     try:
         import pdfplumber
@@ -172,10 +209,16 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
     if resumo_m:
         result["resumo_caso"] = resumo_m.group(1).strip()[:500]
 
-    # Data de audiência
-    data_m = DATA_AUDIENCIA_REGEX.search(full_text)
-    if data_m:
-        result["data_audiencia"] = parse_data_audiencia(data_m.group(1))
+    # Data de audiência — prioriza notificação postal, cai no geral se não encontrar
+    audiencia_info = _extract_audiencia_from_notificacao(pages_text)
+    if audiencia_info:
+        result["data_audiencia"] = audiencia_info["data_audiencia"]
+        if audiencia_info.get("modalidade"):
+            result["modalidade_audiencia"] = audiencia_info["modalidade"]
+    else:
+        data_m = DATA_AUDIENCIA_REGEX.search(full_text)
+        if data_m:
+            result["data_audiencia"] = parse_data_audiencia(data_m.group(1))
 
     result["tem_advogado"] = check_tem_advogado_reclamado(full_text)
 

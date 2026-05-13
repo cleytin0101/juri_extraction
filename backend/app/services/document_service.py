@@ -93,7 +93,11 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
         "tem_advogado": result["tem_advogado"],
         "pdf_url": pdf_path,
         "pdf_expires_at": pdf_expires_at() if pdf_path else None,
-        "raw_data": {"origem": "upload_manual", "filename": filename},
+        "raw_data": {
+            "origem": "upload_manual",
+            "filename": filename,
+            "modalidade_audiencia": parsed.get("modalidade_audiencia"),
+        },
     }
     try:
         proc_result = (
