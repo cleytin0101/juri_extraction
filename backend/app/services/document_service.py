@@ -1,9 +1,9 @@
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Optional
 
 from ..database import get_supabase
-from ..scraper.parser import parse_pdf_text, parse_numero_processo
+from ..scraper.parser import parse_pdf_text, parse_numero_processo, PROCESSO_REGEX
 from ..scraper.enricher import enrich_empresa
 from ..services.storage_service import upload_pdf, pdf_expires_at
 
@@ -13,12 +13,11 @@ logger = logging.getLogger(__name__)
 async def process_document(pdf_bytes: bytes, filename: str) -> dict:
     """
     Processa um PDF de processo judicial:
-    1. Extrai texto e campos com pdfplumber
-    2. Enriquece empresa via CNPJ.ws se CNPJ encontrado
-    3. Persiste processo, empresa e lead no banco
-    4. Faz upload do PDF para Storage
-
-    Retorna dict com os dados extraídos e status do lead.
+    1. Extrai campos com pdfplumber
+    2. Sempre enriquece via CNPJ.ws (independente de ter advogado)
+    3. Persiste processo, empresa e lead para TODOS os documentos
+       - tem_advogado=True  → lead com status="descartado"
+       - tem_advogado=False → lead com status="novo"
     """
     result = {
         "filename": filename,
@@ -51,24 +50,16 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
         "tem_advogado": parsed.get("tem_advogado", False),
     })
 
-    # Extrair número do processo do nome do arquivo como fallback
+    # Número do processo: tenta pelo nome do arquivo, depois pelo texto
     numero = parse_numero_processo(filename)
     if not numero:
-        # Tenta extrair do texto do PDF
-        import re
-        from ..scraper.parser import PROCESSO_REGEX
         text_sample = _extract_text_sample(pdf_bytes)
         m = PROCESSO_REGEX.search(text_sample)
         numero = m.group() if m else filename.replace(".pdf", "")
     result["numero_processo"] = numero
 
-    if result["tem_advogado"]:
-        result["status"] = "tem_advogado"
-        _upsert_processo_only(result, pdf_bytes)
-        return result
-
-    # Enriquecimento via CNPJ.ws
-    enrichment = {}
+    # Enriquecimento via CNPJ.ws — sempre, independente de ter advogado
+    enrichment: dict = {}
     if result["empresa_cnpj"]:
         try:
             enrichment = await enrich_empresa(result["empresa_cnpj"]) or {}
@@ -82,8 +73,6 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
     if telefones:
         result["telefone"] = telefones[0]
         result["telefone_fonte"] = "cnpj_ws"
-    else:
-        result["telefone"] = None
 
     sb = get_supabase()
 
@@ -119,9 +108,7 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
         return result
 
     # Checar se já existe lead para este processo
-    existing = (
-        sb.table("leads").select("id").eq("processo_id", processo_id).execute()
-    )
+    existing = sb.table("leads").select("id").eq("processo_id", processo_id).execute()
     if existing.data:
         result["lead_id"] = existing.data[0]["id"]
         result["status"] = "ja_existe"
@@ -153,12 +140,15 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
         except Exception as e:
             logger.warning(f"Erro ao salvar empresa: {e}")
 
-    # Criar lead
+    # Criar lead para TODOS os documentos
+    # tem_advogado=True → "descartado" (info salva, mas não enviar WhatsApp)
+    # tem_advogado=False → "novo" (pronto para contato)
+    lead_status = "descartado" if result["tem_advogado"] else "novo"
     try:
         lead_result = sb.table("leads").insert({
             "processo_id": processo_id,
             "empresa_id": empresa_id,
-            "status": "novo",
+            "status": lead_status,
             "lead_criado_em": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
@@ -180,29 +170,3 @@ def _extract_text_sample(pdf_bytes: bytes, max_chars: int = 2000) -> str:
             return "\n".join(p.extract_text() or "" for p in pages)[:max_chars]
     except Exception:
         return ""
-
-
-def _upsert_processo_only(result: dict, pdf_bytes: bytes) -> None:
-    """Salva apenas o processo quando tem_advogado=True, sem criar lead."""
-    try:
-        import asyncio
-        sb = get_supabase()
-        pdf_path = None
-        if pdf_bytes:
-            loop = asyncio.get_event_loop()
-            pdf_path = loop.run_until_complete(
-                upload_pdf(sb, result["numero_processo"], pdf_bytes)
-            )
-        sb.table("processos").upsert({
-            "numero_processo": result["numero_processo"],
-            "valor_causa": result["valor_causa"],
-            "resumo_caso": result["resumo_caso"],
-            "reclamante_nome": result["reclamante_nome"],
-            "tem_advogado": True,
-            "pdf_url": pdf_path,
-            "pdf_expires_at": pdf_expires_at() if pdf_path else None,
-            "raw_data": {"origem": "upload_manual"},
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }, on_conflict="numero_processo").execute()
-    except Exception as e:
-        logger.warning(f"Erro ao salvar processo com advogado: {e}")

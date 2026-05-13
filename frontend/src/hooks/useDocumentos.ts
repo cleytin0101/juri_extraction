@@ -3,8 +3,13 @@ import { uploadDocumentos, enviarLote } from "../api/documentos";
 import type { LoteRequest } from "../types/documento";
 
 export function useUploadDocumentos() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (files: File[]) => uploadDocumentos(files),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["metrics"] });
+    },
   });
 }
 
