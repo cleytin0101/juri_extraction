@@ -87,7 +87,7 @@ export function Dashboard() {
           />
           <MetricCard
             label="Mensagens Enviadas"
-            value={isLoading ? "—" : (data?.funnel?.find(f => f.label === "Mensagens enviadas")?.value ?? 0)}
+            value={isLoading ? "—" : (data?.funnel?.find(f => f.label === "Mensagens enviadas")?.count ?? 0)}
             icon={<Scale size={20} />}
             className="bg-surface-800/40 border-white/5 hover:border-indigo-500/50 transition-all duration-300"
           />

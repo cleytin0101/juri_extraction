@@ -1,4 +1,4 @@
-import { api } from "./client";
+import client from "./client";
 import type { DocumentoProcessado, LoteRequest, LoteResult } from "../types/documento";
 
 export async function uploadDocumentos(files: File[]): Promise<DocumentoProcessado[]> {
@@ -6,7 +6,7 @@ export async function uploadDocumentos(files: File[]): Promise<DocumentoProcessa
   for (const file of files) {
     form.append("files", file);
   }
-  const { data } = await api.post<DocumentoProcessado[]>("/api/documentos/upload", form, {
+  const { data } = await client.post<DocumentoProcessado[]>("/documentos/upload", form, {
     headers: { "Content-Type": "multipart/form-data" },
     timeout: 120_000,
   });
@@ -14,6 +14,6 @@ export async function uploadDocumentos(files: File[]): Promise<DocumentoProcessa
 }
 
 export async function enviarLote(payload: LoteRequest): Promise<LoteResult> {
-  const { data } = await api.post<LoteResult>("/api/leads/mensagem/lote", payload);
+  const { data } = await client.post<LoteResult>("/leads/mensagem/lote", payload);
   return data;
 }
