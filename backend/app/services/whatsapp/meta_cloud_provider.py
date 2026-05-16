@@ -1,11 +1,13 @@
 import logging
 import httpx
 from .interface import WhatsAppProvider
+from .template import _fmt_data, _fmt_valor
 from ...config import settings
 
 logger = logging.getLogger(__name__)
 
 GRAPH_API_URL = "https://graph.facebook.com/v19.0"
+TEMPLATE_NAME = "audiencia_trabalhista"
 
 
 class MetaCloudProvider(WhatsAppProvider):
@@ -14,21 +16,39 @@ class MetaCloudProvider(WhatsAppProvider):
     Requer META_PHONE_NUMBER_ID e META_ACCESS_TOKEN no .env.
     """
 
-    async def send_message(self, telefone: str, mensagem: str) -> dict:
+    async def send_message(self, telefone: str, mensagem: str, lead: dict = None) -> dict:
         url = f"{GRAPH_API_URL}/{settings.meta_phone_number_id}/messages"
         headers = {
             "Authorization": f"Bearer {settings.meta_access_token}",
             "Content-Type": "application/json",
         }
-        # Normaliza número: remove '+' inicial se vier com ele
         numero = telefone.lstrip("+")
 
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": numero,
-            "type": "text",
-            "text": {"body": mensagem},
-        }
+        if lead:
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": numero,
+                "type": "template",
+                "template": {
+                    "name": TEMPLATE_NAME,
+                    "language": {"code": "pt_BR"},
+                    "components": [{"type": "body", "parameters": [
+                        {"type": "text", "text": lead.get("empresa_nome") or "sua empresa"},
+                        {"type": "text", "text": _fmt_data(lead.get("data_audiencia"))},
+                        {"type": "text", "text": lead.get("orgao_julgador") or "Vara do Trabalho"},
+                        {"type": "text", "text": lead.get("numero_processo") or "—"},
+                        {"type": "text", "text": lead.get("reclamante_nome") or "um reclamante"},
+                        {"type": "text", "text": _fmt_valor(lead.get("valor_causa"))},
+                    ]}],
+                },
+            }
+        else:
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": numero,
+                "type": "text",
+                "text": {"body": mensagem},
+            }
 
         try:
             async with httpx.AsyncClient(timeout=15) as client:

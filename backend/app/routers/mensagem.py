@@ -34,7 +34,7 @@ async def enviar_mensagem(lead_id: str, body: MensagemRequest = MensagemRequest(
 
     mensagem = render_mensagem(lead)
     provider = get_whatsapp_provider()
-    result = await provider.send_message(telefone, mensagem)
+    result = await provider.send_message(telefone, mensagem, lead=lead)
 
     lead_service.log_mensagem(
         lead_id=lead_id,
@@ -86,7 +86,7 @@ async def enviar_mensagem_lote(body: LoteRequest):
 
         try:
             mensagem = render_mensagem(lead)
-            result = await provider.send_message(telefone, mensagem)
+            result = await provider.send_message(telefone, mensagem, lead=lead)
 
             lead_service.log_mensagem(
                 lead_id=lead_id,

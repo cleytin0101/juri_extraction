@@ -12,7 +12,7 @@ class MockProvider(WhatsAppProvider):
     Substitua por EvolutionProvider, ZAPIProvider, etc. em produção.
     """
 
-    async def send_message(self, telefone: str, mensagem: str) -> dict:
+    async def send_message(self, telefone: str, mensagem: str, lead: dict = None) -> dict:
         ref = str(uuid.uuid4())
         logger.info(
             f"[MOCK WhatsApp] → {telefone}\n"

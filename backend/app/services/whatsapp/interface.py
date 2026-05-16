@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 
 class WhatsAppProvider(ABC):
     @abstractmethod
-    async def send_message(self, telefone: str, mensagem: str) -> dict:
+    async def send_message(self, telefone: str, mensagem: str, lead: dict = None) -> dict:
         """
         Envia mensagem WhatsApp para o número.
         Retorna: {'success': bool, 'provider_ref': str | None, 'erro': str | None}
