@@ -35,10 +35,6 @@ class MetaCloudProvider(WhatsAppProvider):
                     "components": [{"type": "body", "parameters": [
                         {"type": "text", "text": lead.get("empresa_nome") or "sua empresa"},
                         {"type": "text", "text": _fmt_data(lead.get("data_audiencia"))},
-                        {"type": "text", "text": lead.get("orgao_julgador") or "Vara do Trabalho"},
-                        {"type": "text", "text": lead.get("numero_processo") or "—"},
-                        {"type": "text", "text": lead.get("reclamante_nome") or "um reclamante"},
-                        {"type": "text", "text": _fmt_valor(lead.get("valor_causa"))},
                     ]}],
                 },
             }

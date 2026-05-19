@@ -1,13 +1,41 @@
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Query, HTTPException, Request
+from pydantic import BaseModel
 
 from ..config import settings
 from ..database import get_supabase
+from ..services.whatsapp import get_whatsapp_provider
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
+
+
+class TesteRequest(BaseModel):
+    telefone: str
+
+
+@router.post("/test")
+async def testar_conexao(body: TesteRequest):
+    """
+    Envia uma mensagem de texto simples para verificar se as credenciais estão corretas.
+    Não usa template — serve para testar a conexão antes dos disparos reais.
+    """
+    telefone = body.telefone.strip().lstrip("+")
+    if not telefone.isdigit() or len(telefone) < 10:
+        raise HTTPException(status_code=422, detail="Número de telefone inválido. Use apenas dígitos com DDI (ex: 5585999999999).")
+
+    provider = get_whatsapp_provider()
+    result = await provider.send_message(
+        f"+{telefone}",
+        "✅ Teste de conexão — sistema Juri Q&S funcionando!",
+        lead=None,
+    )
+
+    if result.get("success"):
+        return {"ok": True}
+    return {"ok": False, "erro": result.get("erro", "Falha no envio")}
 
 
 @router.get("/webhook")
