@@ -97,6 +97,37 @@ async def receber_webhook(request: Request):
     return {"status": "ok"}
 
 
+@router.post("/chatwoot-webhook")
+async def chatwoot_webhook(request: Request):
+    """
+    Recebe eventos do Chatwoot (webhook de saída).
+    Quando uma empresa responde, o Chatwoot chama este endpoint.
+    Extrai o número do contato e marca o lead como 'respondido'.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Payload inválido.")
+
+    event = body.get("event")
+    if event != "message_created":
+        return {"status": "ignored"}
+
+    msg_type = body.get("message_type")
+    if msg_type != "incoming":
+        return {"status": "ignored"}
+
+    meta = body.get("meta", {})
+    sender = meta.get("sender", {})
+    phone = sender.get("phone_number") or ""
+    if not phone:
+        return {"status": "no_phone"}
+
+    logger.info(f"[Chatwoot Webhook] Resposta recebida de {phone}")
+    _marcar_lead_respondido(phone)
+    return {"status": "ok"}
+
+
 def _marcar_lead_respondido(telefone: str) -> None:
     """
     Busca o lead mais recente com aquele número de telefone e atualiza para 'respondido'.

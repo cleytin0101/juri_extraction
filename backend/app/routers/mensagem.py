@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from ..services import lead_service
 from ..services.whatsapp import get_whatsapp_provider
 from ..services.whatsapp.template import render_mensagem
+from ..services import chatwoot_service
 from ..config import settings
 
 router = APIRouter(prefix="/api/leads", tags=["mensagem"])
@@ -48,6 +49,11 @@ async def enviar_mensagem(lead_id: str, body: MensagemRequest = MensagemRequest(
 
     if result.get("success"):
         lead_service.mark_enviado(lead_id, mensagem)
+        await chatwoot_service.registrar_mensagem_enviada(
+            telefone=telefone,
+            nome=lead.get("empresa_nome", ""),
+            texto=mensagem,
+        )
 
     return {
         "ok": result.get("success"),
@@ -101,6 +107,11 @@ async def enviar_mensagem_lote(body: LoteRequest):
             if result.get("success"):
                 lead_service.mark_enviado(lead_id, mensagem)
                 enviados.append(lead_id)
+                await chatwoot_service.registrar_mensagem_enviada(
+                    telefone=telefone,
+                    nome=lead.get("empresa_nome", ""),
+                    texto=mensagem,
+                )
             else:
                 erros.append({"lead_id": lead_id, "erro": result.get("erro", "Falha no provider")})
         except Exception as e:

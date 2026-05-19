@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # Dados do advogado para template WhatsApp
     advogado_nome: str = ""
     advogado_contato: str = ""
+    # Chatwoot CRM
+    chatwoot_url: str = ""
+    chatwoot_api_token: str = ""
+    chatwoot_account_id: str = ""
+    chatwoot_inbox_id: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
