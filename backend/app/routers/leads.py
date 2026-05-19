@@ -12,8 +12,20 @@ def list_leads(
     status: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    valor_min: Optional[float] = Query(None),
+    valor_max: Optional[float] = Query(None),
+    data_audiencia_de: Optional[str] = Query(None),
+    data_audiencia_ate: Optional[str] = Query(None),
 ):
-    data = lead_service.get_leads(status=status, page=page, page_size=page_size)
+    data = lead_service.get_leads(
+        status=status,
+        page=page,
+        page_size=page_size,
+        valor_min=valor_min,
+        valor_max=valor_max,
+        data_audiencia_de=data_audiencia_de,
+        data_audiencia_ate=data_audiencia_ate,
+    )
     return LeadListResponse(**data)
 
 

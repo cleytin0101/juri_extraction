@@ -5,6 +5,10 @@ export async function fetchLeads(params: {
   status?: string;
   page?: number;
   page_size?: number;
+  valor_min?: number;
+  valor_max?: number;
+  data_audiencia_de?: string;
+  data_audiencia_ate?: string;
 }): Promise<LeadListResponse> {
   const { data } = await client.get<LeadListResponse>("/leads", { params });
   return data;

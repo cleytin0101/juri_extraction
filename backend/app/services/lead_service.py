@@ -12,17 +12,31 @@ def get_leads(
     status: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
+    valor_min: Optional[float] = None,
+    valor_max: Optional[float] = None,
+    data_audiencia_de: Optional[str] = None,
+    data_audiencia_ate: Optional[str] = None,
 ) -> dict:
     sb = get_supabase()
     query = sb.table("leads_completo").select("*")
-
-    if status:
-        query = query.eq("status", status)
-
-    # count total
     count_query = sb.table("leads_completo").select("lead_id", count="exact")
-    if status:
-        count_query = count_query.eq("status", status)
+
+    def _apply_filters(q):
+        if status:
+            q = q.eq("status", status)
+        if valor_min is not None:
+            q = q.gte("valor_causa", valor_min)
+        if valor_max is not None:
+            q = q.lte("valor_causa", valor_max)
+        if data_audiencia_de:
+            q = q.gte("data_audiencia", data_audiencia_de)
+        if data_audiencia_ate:
+            q = q.lte("data_audiencia", data_audiencia_ate + "T23:59:59")
+        return q
+
+    query = _apply_filters(query)
+    count_query = _apply_filters(count_query)
+
     count_result = count_query.execute()
     total = count_result.count or 0
 
