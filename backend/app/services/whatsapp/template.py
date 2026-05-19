@@ -1,44 +1,16 @@
-from datetime import datetime
-from typing import Optional
-
-
 TEMPLATE = (
-    "Olá! Aqui é o Dr. Diego Queiroz, advogado trabalhista.\n\n"
-    "Identifiquei que a empresa *{empresa_nome}* possui uma demanda trabalhista "
-    "em andamento com audiência prevista para {data_audiencia}.\n\n"
-    "Sou especializado na defesa de empresas reclamadas e atuo exclusivamente nessa área há anos.\n\n"
-    "Uma estratégia jurídica bem estruturada antes da audiência pode ajudar a reduzir "
-    "possíveis condenações e gerar uma economia significativa para a empresa.\n\n"
-    "Caso tenha interesse, posso explicar rapidamente os riscos envolvidos e quais "
-    "estratégias podem ser adotadas para este caso, sem compromisso.\n\n"
-    "Teria disponibilidade para uma conversa rápida?"
+    "Olá, tudo bem?\n\n"
+    "Somos o escritório Queiroz & Santos Advocacia, especialistas em assessoria "
+    "jurídica empresarial aqui da região.\n\n"
+    "Ao analisar publicações recentes da Justiça do Trabalho, vimos que a empresa "
+    "de vocês possui uma audiência marcada para os próximos dias.\n\n"
+    "Como atuamos somente na defesa de empresas, resolvemos entrar em contato caso "
+    "ainda não estejam sendo assessorados no processo.\n\n"
+    "Se já estiverem acompanhados de advogado, agradeço desde já a atenção. Mas, "
+    "caso tenham interesse, podemos explicar rapidamente como funciona nosso trabalho.\n\n"
+    "Instagram profissional: @queirozesantosadvocacia"
 )
 
 
 def render_mensagem(lead: dict) -> str:
-    return TEMPLATE.format(
-        empresa_nome=lead.get("empresa_nome") or "sua empresa",
-        data_audiencia=_fmt_data(lead.get("data_audiencia")),
-    )
-
-
-def _fmt_data(value) -> str:
-    if isinstance(value, datetime):
-        return value.strftime("%d/%m/%Y")
-    if isinstance(value, str) and value:
-        try:
-            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return dt.strftime("%d/%m/%Y")
-        except ValueError:
-            return value
-    return "data a confirmar"
-
-
-def _fmt_valor(value) -> str:
-    if value is None:
-        return "valor a confirmar"
-    try:
-        v = float(value)
-        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    except (ValueError, TypeError):
-        return str(value)
+    return TEMPLATE

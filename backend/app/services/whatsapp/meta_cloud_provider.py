@@ -1,7 +1,6 @@
 import logging
 import httpx
 from .interface import WhatsAppProvider
-from .template import _fmt_data, _fmt_valor
 from ...config import settings
 
 logger = logging.getLogger(__name__)
@@ -24,27 +23,15 @@ class MetaCloudProvider(WhatsAppProvider):
         }
         numero = telefone.lstrip("+")
 
-        if lead:
-            payload = {
-                "messaging_product": "whatsapp",
-                "to": numero,
-                "type": "template",
-                "template": {
-                    "name": TEMPLATE_NAME,
-                    "language": {"code": "pt_BR"},
-                    "components": [{"type": "body", "parameters": [
-                        {"type": "text", "text": lead.get("empresa_nome") or "sua empresa"},
-                        {"type": "text", "text": _fmt_data(lead.get("data_audiencia"))},
-                    ]}],
-                },
-            }
-        else:
-            payload = {
-                "messaging_product": "whatsapp",
-                "to": numero,
-                "type": "text",
-                "text": {"body": mensagem},
-            }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": numero,
+            "type": "template",
+            "template": {
+                "name": TEMPLATE_NAME,
+                "language": {"code": "pt_BR"},
+            },
+        }
 
         try:
             async with httpx.AsyncClient(timeout=15) as client:

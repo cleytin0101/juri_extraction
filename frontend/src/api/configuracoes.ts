@@ -20,11 +20,7 @@ export async function saveConfiguracoes(body: ConfiguracoesUpdate): Promise<void
   await client.post("/configuracoes", body);
 }
 
-export async function testWhatsapp(params: {
-  telefone: string;
-  empresa_nome: string;
-  data_audiencia: string;
-}): Promise<{ ok: boolean; erro?: string }> {
-  const { data } = await client.post<{ ok: boolean; erro?: string }>("/whatsapp/test", params);
+export async function testWhatsapp(telefone: string): Promise<{ ok: boolean; erro?: string }> {
+  const { data } = await client.post<{ ok: boolean; erro?: string }>("/whatsapp/test", { telefone });
   return data;
 }

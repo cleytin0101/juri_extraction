@@ -10,8 +10,6 @@ export function Configuracoes() {
   const [error, setError] = useState("");
 
   const [testTelefone, setTestTelefone] = useState("");
-  const [testEmpresa, setTestEmpresa] = useState("Empresa Teste Ltda");
-  const [testData, setTestData] = useState("2026-01-01");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; erro?: string } | null>(null);
 
@@ -28,11 +26,7 @@ export function Configuracoes() {
     setTesting(true);
     setTestResult(null);
     try {
-      const result = await testWhatsapp({
-        telefone: testTelefone,
-        empresa_nome: testEmpresa,
-        data_audiencia: testData ? `${testData}T10:00:00` : "2026-01-01T10:00:00",
-      });
+      const result = await testWhatsapp(testTelefone);
       setTestResult(result);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Erro ao conectar com o backend";
@@ -113,17 +107,17 @@ export function Configuracoes() {
             </h2>
           </div>
           <div className="bg-[#0a0f1e] rounded-xl p-4 text-sm text-slate-300 leading-relaxed whitespace-pre-line border border-white/5">
-{`Olá! Aqui é o Dr. Diego Queiroz, advogado trabalhista.
+{`Olá, tudo bem?
 
-Identifiquei que a empresa *[EMPRESA]* possui uma demanda trabalhista em andamento com audiência prevista para [DATA].
+Somos o escritório Queiroz & Santos Advocacia, especialistas em assessoria jurídica empresarial aqui da região.
 
-Sou especializado na defesa de empresas reclamadas e atuo exclusivamente nessa área há anos.
+Ao analisar publicações recentes da Justiça do Trabalho, vimos que a empresa de vocês possui uma audiência marcada para os próximos dias.
 
-Uma estratégia jurídica bem estruturada antes da audiência pode ajudar a reduzir possíveis condenações e gerar uma economia significativa para a empresa.
+Como atuamos somente na defesa de empresas, resolvemos entrar em contato caso ainda não estejam sendo assessorados no processo.
 
-Caso tenha interesse, posso explicar rapidamente os riscos envolvidos e quais estratégias podem ser adotadas para este caso, sem compromisso.
+Se já estiverem acompanhados de advogado, agradeço desde já a atenção. Mas, caso tenham interesse, podemos explicar rapidamente como funciona nosso trabalho.
 
-Teria disponibilidade para uma conversa rápida?`}
+Instagram profissional: @queirozesantosadvocacia`}
           </div>
         </div>
 
@@ -138,7 +132,7 @@ Teria disponibilidade para uma conversa rápida?`}
             </h2>
           </div>
           <p className="text-slate-500 text-xs leading-relaxed">
-            Envia o template real com dados fictícios para o seu número. Confirma que a integração está funcionando de ponta a ponta.
+            Envia o template real para o seu número. Confirma que a integração está funcionando de ponta a ponta.
           </p>
 
           <div className="space-y-3">
@@ -152,28 +146,6 @@ Teria disponibilidade para uma conversa rápida?`}
                 className="w-full bg-surface-700 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-colors font-mono"
               />
               <p className="text-slate-600 text-xs mt-1">Inclua o 55 do Brasil. Ex: <span className="font-mono text-slate-500">5588981035842</span></p>
-            </div>
-
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <label className="text-slate-400 text-xs block mb-1">Empresa (para o template)</label>
-                <input
-                  type="text"
-                  placeholder="Empresa Teste Ltda"
-                  value={testEmpresa}
-                  onChange={(e) => { setTestEmpresa(e.target.value); setTestResult(null); }}
-                  className="w-full bg-surface-700 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-colors"
-                />
-              </div>
-              <div>
-                <label className="text-slate-400 text-xs block mb-1">Data da audiência</label>
-                <input
-                  type="date"
-                  value={testData}
-                  onChange={(e) => { setTestData(e.target.value); setTestResult(null); }}
-                  className="bg-surface-700 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-colors"
-                />
-              </div>
             </div>
 
             <button
