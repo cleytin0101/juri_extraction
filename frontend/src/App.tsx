@@ -5,6 +5,7 @@ import { UploadPanel } from "./pages/UploadPanel";
 import { Configuracoes } from "./pages/Configuracoes";
 import Agenda from "./pages/Agenda";
 import { Disparos } from "./pages/Disparos";
+import Privacidade from "./pages/Privacidade";
 import clsx from "clsx";
 
 function Nav() {
@@ -85,6 +86,7 @@ export default function App() {
         <Route path="/configuracoes" element={<Configuracoes />} />
         <Route path="/agenda" element={<Agenda />} />
         <Route path="/disparos" element={<Disparos />} />
+        <Route path="/privacidade" element={<Privacidade />} />
       </Routes>
     </BrowserRouter>
   );
