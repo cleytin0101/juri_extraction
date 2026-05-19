@@ -14,24 +14,30 @@ router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 
 class TesteRequest(BaseModel):
     telefone: str
+    empresa_nome: str = "Empresa Teste Ltda"
+    data_audiencia: str = "2026-01-01T10:00:00"
 
 
 @router.post("/test")
 async def testar_conexao(body: TesteRequest):
     """
-    Envia uma mensagem de texto simples para verificar se as credenciais estão corretas.
-    Não usa template — serve para testar a conexão antes dos disparos reais.
+    Envia o template audiencia_trabalhista com dados de teste para verificar a integração.
+    Usa o template real (não texto livre) pois a Meta só entrega templates para números novos.
     """
     telefone = body.telefone.strip().lstrip("+")
-    if not telefone.isdigit() or len(telefone) < 10:
-        raise HTTPException(status_code=422, detail="Número de telefone inválido. Use apenas dígitos com DDI (ex: 5585999999999).")
+    if not telefone.isdigit() or len(telefone) < 12:
+        raise HTTPException(
+            status_code=422,
+            detail="Número inválido. Inclua o DDI do Brasil (55) na frente. Ex: 5588981035842",
+        )
+
+    lead_teste = {
+        "empresa_nome": body.empresa_nome,
+        "data_audiencia": body.data_audiencia,
+    }
 
     provider = get_whatsapp_provider()
-    result = await provider.send_message(
-        f"+{telefone}",
-        "✅ Teste de conexão — sistema Juri Q&S funcionando!",
-        lead=None,
-    )
+    result = await provider.send_message(f"+{telefone}", "", lead=lead_teste)
 
     if result.get("success"):
         return {"ok": True}

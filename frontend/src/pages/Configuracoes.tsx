@@ -10,6 +10,8 @@ export function Configuracoes() {
   const [error, setError] = useState("");
 
   const [testTelefone, setTestTelefone] = useState("");
+  const [testEmpresa, setTestEmpresa] = useState("Empresa Teste Ltda");
+  const [testData, setTestData] = useState("2026-01-01");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; erro?: string } | null>(null);
 
@@ -26,7 +28,11 @@ export function Configuracoes() {
     setTesting(true);
     setTestResult(null);
     try {
-      const result = await testWhatsapp(testTelefone);
+      const result = await testWhatsapp({
+        telefone: testTelefone,
+        empresa_nome: testEmpresa,
+        data_audiencia: testData ? `${testData}T10:00:00` : "2026-01-01T10:00:00",
+      });
       setTestResult(result);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Erro ao conectar com o backend";
@@ -107,16 +113,17 @@ export function Configuracoes() {
             </h2>
           </div>
           <div className="bg-[#0a0f1e] rounded-xl p-4 text-sm text-slate-300 leading-relaxed whitespace-pre-line border border-white/5">
-{`Olá, tudo bem?
+{`Olá! Aqui é o Dr. Diego Queiroz, advogado trabalhista.
 
-Sou advogado trabalhista e localizei que a empresa *[EMPRESA]* possui uma audiência trabalhista marcada para o dia *[DATA]*, na [VARA] do TRT-7.
+Identifiquei que a empresa *[EMPRESA]* possui uma demanda trabalhista em andamento com audiência prevista para [DATA].
 
-O processo nº [NÚMERO] envolve [RECLAMANTE] e o valor da causa é de *[VALOR]*.
+Sou especializado na defesa de empresas reclamadas e atuo exclusivamente nessa área há anos.
 
-Ofereço assistência jurídica especializada em defesa de empresas em ações trabalhistas. Posso analisar o caso sem compromisso e apresentar uma proposta de honorários.
+Uma estratégia jurídica bem estruturada antes da audiência pode ajudar a reduzir possíveis condenações e gerar uma economia significativa para a empresa.
 
-${advogadoNome || "[SEU NOME]"}
-${advogadoContato || "[SEU CONTATO]"}`}
+Caso tenha interesse, posso explicar rapidamente os riscos envolvidos e quais estratégias podem ser adotadas para este caso, sem compromisso.
+
+Teria disponibilidade para uma conversa rápida?`}
           </div>
         </div>
 
@@ -131,24 +138,51 @@ ${advogadoContato || "[SEU CONTATO]"}`}
             </h2>
           </div>
           <p className="text-slate-500 text-xs leading-relaxed">
-            Digite o seu próprio número para receber uma mensagem de teste e confirmar que as credenciais estão funcionando.
-            Use o formato com DDI: <span className="text-slate-400 font-mono">5585999999999</span>
+            Envia o template real com dados fictícios para o seu número. Confirma que a integração está funcionando de ponta a ponta.
           </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="5585999999999"
-              value={testTelefone}
-              onChange={(e) => { setTestTelefone(e.target.value); setTestResult(null); }}
-              className="flex-1 bg-surface-700 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-colors font-mono"
-            />
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-slate-400 text-xs block mb-1">Seu número (com DDI 55)</label>
+              <input
+                type="text"
+                placeholder="5588981035842"
+                value={testTelefone}
+                onChange={(e) => { setTestTelefone(e.target.value); setTestResult(null); }}
+                className="w-full bg-surface-700 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-colors font-mono"
+              />
+              <p className="text-slate-600 text-xs mt-1">Inclua o 55 do Brasil. Ex: <span className="font-mono text-slate-500">5588981035842</span></p>
+            </div>
+
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="text-slate-400 text-xs block mb-1">Empresa (para o template)</label>
+                <input
+                  type="text"
+                  placeholder="Empresa Teste Ltda"
+                  value={testEmpresa}
+                  onChange={(e) => { setTestEmpresa(e.target.value); setTestResult(null); }}
+                  className="w-full bg-surface-700 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 text-xs block mb-1">Data da audiência</label>
+                <input
+                  type="date"
+                  value={testData}
+                  onChange={(e) => { setTestData(e.target.value); setTestResult(null); }}
+                  className="bg-surface-700 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500/50 transition-colors"
+                />
+              </div>
+            </div>
+
             <button
               onClick={handleTest}
-              disabled={testing || testTelefone.trim().length < 10}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm rounded-xl font-medium transition-colors whitespace-nowrap"
+              disabled={testing || testTelefone.trim().length < 12}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm rounded-xl font-medium transition-colors"
             >
               {testing ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />}
-              {testing ? "Enviando..." : "Enviar teste"}
+              {testing ? "Enviando..." : "Enviar mensagem de teste para meu WhatsApp"}
             </button>
           </div>
 
