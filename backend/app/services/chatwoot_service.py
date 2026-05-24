@@ -23,7 +23,8 @@ async def _get_or_create_contact(client: httpx.AsyncClient, telefone: str, nome:
     search = await client.get(f"{_base()}/contacts/search", params={"q": phone, "include_contacts": "true"})
     if search.is_success:
         payload = search.json()
-        contacts = payload.get("payload", {}).get("contacts", [])
+        raw = payload.get("payload", [])
+        contacts = raw.get("contacts", []) if isinstance(raw, dict) else raw
         if contacts:
             return contacts[0]["id"]
 
