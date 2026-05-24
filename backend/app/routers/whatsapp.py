@@ -33,6 +33,11 @@ async def testar_conexao(body: TesteRequest):
     result = await provider.send_message(f"+{telefone}", "")
 
     if result.get("success"):
+        await chatwoot_service.registrar_mensagem_enviada(
+            telefone=f"+{telefone}",
+            nome="Teste de conexão",
+            texto="[Mensagem de teste enviada via painel]",
+        )
         return {"ok": True}
     return {"ok": False, "erro": result.get("erro", "Falha no envio")}
 
