@@ -56,12 +56,18 @@ async def debug_chatwoot():
         {"headers": {}, "params": {"api_access_token": token}, "label": "query:api_access_token"},
     ]
     resultado["autenticado_via"] = None
+    resultado["tentativas"] = []
     auth_headers = None
 
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             for attempt in auth_attempts:
                 r = await client.get(profile_url, headers=attempt["headers"], params=attempt["params"])
+                resultado["tentativas"].append({
+                    "formato": attempt["label"],
+                    "status": r.status_code,
+                    "body": r.text[:300],
+                })
                 if r.is_success:
                     resultado["autenticado_via"] = attempt["label"]
                     resultado["conta_valida"] = True
@@ -69,7 +75,7 @@ async def debug_chatwoot():
                     break
 
             if not resultado["conta_valida"]:
-                resultado["erro"] = "Todos os 3 formatos falharam no GET /profile"
+                resultado["erro"] = "Todos os 3 formatos falharam — ver campo 'tentativas'"
                 return resultado
 
             r2 = await client.get(f"{base}/inboxes", headers=auth_headers)
