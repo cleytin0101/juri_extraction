@@ -49,12 +49,15 @@ async def debug_chatwoot():
     headers = {"api_access_token": settings.chatwoot_api_token}
     base = f"{settings.chatwoot_url.rstrip('/')}/api/v1/accounts/{settings.chatwoot_account_id}"
 
+    profile_url = f"{settings.chatwoot_url.rstrip('/')}/api/v1/profile"
+
     try:
         async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get(base, headers=headers)
+            # Valida token com /profile (acessível a qualquer usuário autenticado)
+            r = await client.get(profile_url, headers=headers)
             resultado["conta_valida"] = r.is_success
             if not r.is_success:
-                resultado["erro"] = f"GET /accounts retornou {r.status_code}: {r.text[:300]}"
+                resultado["erro"] = f"GET /profile retornou {r.status_code}: {r.text[:300]}"
                 return resultado
 
             r2 = await client.get(f"{base}/inboxes", headers=headers)
