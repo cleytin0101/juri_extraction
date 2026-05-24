@@ -28,11 +28,46 @@ def parse_numero_processo(text: str) -> Optional[str]:
     return match.group() if match else None
 
 
+def _cnpj_valido(digits: str) -> bool:
+    if len(digits) != 14 or len(set(digits)) == 1:
+        return False
+    pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    soma = sum(int(digits[i]) * pesos1[i] for i in range(12))
+    r = soma % 11
+    d1 = 0 if r < 2 else 11 - r
+    if int(digits[12]) != d1:
+        return False
+    pesos2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    soma = sum(int(digits[i]) * pesos2[i] for i in range(13))
+    r = soma % 11
+    d2 = 0 if r < 2 else 11 - r
+    return int(digits[13]) == d2
+
+
+_PALAVRAS_FRASE = re.compile(
+    r"\b(que|foi|pelo|pela|para|como|este|essa|com\s|nos\s|das\s|dos\s|numa|uma\s|sendo|sendo\s|admitido|caracteriza)\b",
+    re.IGNORECASE,
+)
+
+_SUFIXO_EMPRESA = re.compile(
+    r"\b(LTDA|S\.A\.|ME\b|EPP\b|EIRELI|S/A|SOCIEDADE|COMERCIO|COMERCIAL|INDUSTRIA|SERVICOS|SERVICOS|CONSTRUTORA|TRANSPORTES|HOLDING)\b",
+    re.IGNORECASE,
+)
+
+
+def _nome_parece_empresa(nome: str) -> bool:
+    if not nome or len(nome.strip()) < 4:
+        return False
+    if len(_PALAVRAS_FRASE.findall(nome)) >= 2:
+        return False
+    return True
+
+
 def extract_cnpj(text: str) -> Optional[str]:
     match = CNPJ_REGEX.search(text)
     if match:
         digits = re.sub(r"\D", "", match.group())
-        return digits if len(digits) == 14 else None
+        return digits if _cnpj_valido(digits) else None
     return None
 
 
@@ -165,34 +200,55 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
     if m:
         result["reclamante_nome"] = m.group(1).strip()
 
-    # RECLAMADO / empresa — aceita nomes com pontos, barras e hífens
+    # RECLAMADO / empresa — padrão principal + fallback com validação
     m = re.search(
         r"RECLAMAD[AO][:\s]+([A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇa-záàâãéêíóôõúüç\s\-\.\/&]+?)(?=\n|CPF|CNPJ|$)",
         full_text,
         re.IGNORECASE,
     )
-    if m:
+    if m and _nome_parece_empresa(m.group(1).strip()):
         result["empresa_nome"] = m.group(1).strip()
+    else:
+        # Padrão alternativo para ATSum: "Reclamada: EMPRESA LTDA, CNPJ..."
+        m2 = re.search(
+            r"[Rr]eclama[da][ao]\s*[:\-]?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][^,\n]{3,80}?(?:LTDA|S\.A\.|ME\b|EPP\b|EIRELI|S/A|COMERCIO|INDUSTRIA|SERVICOS|CONSTRUTORA|TRANSPORTES)[^,\n]{0,40}?)(?=[,\n\(]|CNPJ|CPF|$)",
+            full_text,
+            re.IGNORECASE,
+        )
+        if m2:
+            result["empresa_nome"] = m2.group(1).strip()
 
-    # CNPJ — prioriza "CNPJ: XX.XXX.XXX/XXXX-XX" próximo ao reclamado
+    # CNPJ — cascata de 3 tentativas com validação de dígitos verificadores
     reclamado_pos = full_text.lower().find("reclamad")
-    nearby = full_text[reclamado_pos: reclamado_pos + 600] if reclamado_pos >= 0 else full_text
-    labeled = re.search(
-        r"CNPJ[:\s]+(\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})",
-        nearby,
+    search_scope = full_text[reclamado_pos:] if reclamado_pos >= 0 else full_text
+
+    # Tentativa 1: padrão ATSum "CNPJ sob o n° XX" / "CNPJ nº XX" / "CNPJ: XX"
+    t1 = re.search(
+        r"CNPJ\s*(?:sob\s+o\s+n[°º.]?\s*|n[°º.]\s*|:\s*)(\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})",
+        search_scope,
         re.IGNORECASE,
     )
-    if labeled:
-        digits = re.sub(r"\D", "", labeled.group(1))
-        if len(digits) == 14:
+    if t1:
+        digits = re.sub(r"\D", "", t1.group(1))
+        if _cnpj_valido(digits):
             result["empresa_cnpj"] = digits
-    else:
-        search_full = full_text[reclamado_pos:] if reclamado_pos >= 0 else full_text
-        cnpj_m = CNPJ_REGEX.search(search_full)
-        if cnpj_m:
-            digits = re.sub(r"\D", "", cnpj_m.group())
-            if len(digits) == 14:
+
+    # Tentativa 2: qualquer "CNPJ" seguido do número nos primeiros 600 chars após reclamad
+    if not result["empresa_cnpj"]:
+        nearby = search_scope[:600]
+        t2 = re.search(r"CNPJ[:\s]+(\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})", nearby, re.IGNORECASE)
+        if t2:
+            digits = re.sub(r"\D", "", t2.group(1))
+            if _cnpj_valido(digits):
                 result["empresa_cnpj"] = digits
+
+    # Tentativa 3: primeiro CNPJ válido após reclamad (fallback)
+    if not result["empresa_cnpj"]:
+        for m_cnpj in CNPJ_REGEX.finditer(search_scope):
+            digits = re.sub(r"\D", "", m_cnpj.group())
+            if _cnpj_valido(digits):
+                result["empresa_cnpj"] = digits
+                break
 
     # Valor da causa — várias grafias possíveis
     valor_m = re.search(
