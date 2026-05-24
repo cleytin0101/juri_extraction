@@ -46,21 +46,33 @@ async def debug_chatwoot():
     if not resultado["vars_configuradas"]:
         return resultado
 
-    headers = {"api_access_token": settings.chatwoot_api_token}
+    token = settings.chatwoot_api_token
     base = f"{settings.chatwoot_url.rstrip('/')}/api/v1/accounts/{settings.chatwoot_account_id}"
-
     profile_url = f"{settings.chatwoot_url.rstrip('/')}/api/v1/profile"
+
+    auth_attempts = [
+        {"headers": {"api_access_token": token}, "params": {}, "label": "header:api_access_token"},
+        {"headers": {"user_access_token": token}, "params": {}, "label": "header:user_access_token"},
+        {"headers": {}, "params": {"api_access_token": token}, "label": "query:api_access_token"},
+    ]
+    resultado["autenticado_via"] = None
+    auth_headers = None
 
     try:
         async with httpx.AsyncClient(timeout=8) as client:
-            # Valida token com /profile (acessível a qualquer usuário autenticado)
-            r = await client.get(profile_url, headers=headers)
-            resultado["conta_valida"] = r.is_success
-            if not r.is_success:
-                resultado["erro"] = f"GET /profile retornou {r.status_code}: {r.text[:300]}"
+            for attempt in auth_attempts:
+                r = await client.get(profile_url, headers=attempt["headers"], params=attempt["params"])
+                if r.is_success:
+                    resultado["autenticado_via"] = attempt["label"]
+                    resultado["conta_valida"] = True
+                    auth_headers = attempt["headers"]
+                    break
+
+            if not resultado["conta_valida"]:
+                resultado["erro"] = "Todos os 3 formatos falharam no GET /profile"
                 return resultado
 
-            r2 = await client.get(f"{base}/inboxes", headers=headers)
+            r2 = await client.get(f"{base}/inboxes", headers=auth_headers)
             if r2.is_success:
                 inboxes = r2.json().get("payload", [])
                 resultado["inboxes_disponiveis"] = [
