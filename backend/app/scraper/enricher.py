@@ -37,7 +37,7 @@ async def _enrich_cnpjws(cnpj: str) -> dict:
         return {}
     url = f"{settings.cnpj_api_url}/{digits}"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(url)
             if r.status_code == 200:
                 data = r.json()
@@ -72,7 +72,7 @@ async def _enrich_cnpja_by_cnpj(cnpj_digits: str) -> dict:
     headers = {"Authorization": settings.cnpja_api_key}
     params = {"strategy": "CACHE_IF_FRESH", "maxAge": 45}
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(url, headers=headers, params=params)
             if r.status_code == 200:
                 data = r.json()
@@ -96,7 +96,7 @@ async def _search_cnpja_by_name(nome: str) -> dict:
     url = f"{settings.cnpja_api_url}/office/search"
     headers = {"Authorization": settings.cnpja_api_key}
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(url, headers=headers, params={"query": nome, "limit": 3})
             if r.status_code == 200:
                 offices = r.json().get("offices", [])

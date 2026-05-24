@@ -8,7 +8,7 @@ export async function uploadDocumentos(files: File[]): Promise<DocumentoProcessa
   }
   const { data } = await client.post<DocumentoProcessado[]>("/documentos/upload", form, {
     headers: { "Content-Type": "multipart/form-data" },
-    timeout: 120_000,
+    timeout: 240_000,
   });
   return data;
 }

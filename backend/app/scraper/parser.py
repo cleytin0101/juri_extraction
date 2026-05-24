@@ -174,14 +174,25 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
     if m:
         result["empresa_nome"] = m.group(1).strip()
 
-    # CNPJ — primeiro CNPJ válido após keyword RECLAMADO
+    # CNPJ — prioriza "CNPJ: XX.XXX.XXX/XXXX-XX" próximo ao reclamado
     reclamado_pos = full_text.lower().find("reclamad")
-    search_text = full_text[reclamado_pos:] if reclamado_pos >= 0 else full_text
-    cnpj_m = CNPJ_REGEX.search(search_text)
-    if cnpj_m:
-        digits = re.sub(r"\D", "", cnpj_m.group())
+    nearby = full_text[reclamado_pos: reclamado_pos + 600] if reclamado_pos >= 0 else full_text
+    labeled = re.search(
+        r"CNPJ[:\s]+(\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})",
+        nearby,
+        re.IGNORECASE,
+    )
+    if labeled:
+        digits = re.sub(r"\D", "", labeled.group(1))
         if len(digits) == 14:
             result["empresa_cnpj"] = digits
+    else:
+        search_full = full_text[reclamado_pos:] if reclamado_pos >= 0 else full_text
+        cnpj_m = CNPJ_REGEX.search(search_full)
+        if cnpj_m:
+            digits = re.sub(r"\D", "", cnpj_m.group())
+            if len(digits) == 14:
+                result["empresa_cnpj"] = digits
 
     # Valor da causa — várias grafias possíveis
     valor_m = re.search(
