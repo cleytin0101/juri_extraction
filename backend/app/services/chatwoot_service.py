@@ -101,7 +101,7 @@ async def registrar_mensagem_enviada(telefone: str, nome: str, texto: str) -> No
             await client.post(f"{_base()}/conversations/{conv_id}/messages", json={
                 "content": texto,
                 "message_type": "outgoing",
-                "private": False,
+                "private": True,
             })
             logger.info(f"[Chatwoot] Mensagem registrada — conversa {conv_id} contato {contact_id}")
     except Exception as exc:
