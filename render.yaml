@@ -17,6 +17,14 @@ services:
         sync: false
       - key: SCRAPE_SCHEDULE_CRON
         value: "0 7 * * 1-5"
+      - key: CHATWOOT_URL
+        sync: false
+      - key: CHATWOOT_API_TOKEN
+        sync: false
+      - key: CHATWOOT_ACCOUNT_ID
+        sync: false
+      - key: CHATWOOT_INBOX_ID
+        sync: false
 
   - type: web
     name: juri-frontend

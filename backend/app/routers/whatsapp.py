@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from ..config import settings
 from ..database import get_supabase
 from ..services.whatsapp import get_whatsapp_provider
+from ..services import chatwoot_service
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +78,10 @@ async def receber_webhook(request: Request):
                 if not telefone_remetente:
                     continue
 
+                texto = message.get("text", {}).get("body", "(mensagem recebida)")
                 logger.info(f"[Webhook Meta] Mensagem recebida de {telefone_remetente}")
                 _marcar_lead_respondido(telefone_remetente)
+                await chatwoot_service.registrar_mensagem_recebida(telefone_remetente, texto)
 
             # Atualizações de status de entrega/leitura
             for status_update in value.get("statuses", []):
