@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -36,7 +37,7 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
     }
 
     try:
-        parsed = parse_pdf_text(pdf_bytes)
+        parsed = await asyncio.to_thread(parse_pdf_text, pdf_bytes)
     except Exception as e:
         result["erro_msg"] = f"Falha ao ler PDF: {e}"
         return result
@@ -53,7 +54,7 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
     # Número do processo: tenta pelo nome do arquivo, depois pelo texto
     numero = parse_numero_processo(filename)
     if not numero:
-        text_sample = _extract_text_sample(pdf_bytes)
+        text_sample = await asyncio.to_thread(_extract_text_sample, pdf_bytes)
         m = PROCESSO_REGEX.search(text_sample)
         numero = m.group() if m else filename.replace(".pdf", "")
     result["numero_processo"] = numero

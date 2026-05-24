@@ -32,7 +32,8 @@ client.interceptors.response.use(
     const isTransient =
       (status && TRANSIENT_STATUSES.has(status)) || isTimeout || isNetworkError;
     const cfg = error.config as typeof error.config & { _retryCount?: number };
-    if (isTransient && cfg) {
+    const isUpload = cfg?.url?.includes("/documentos/upload");
+    if (isTransient && cfg && !isUpload) {
       cfg._retryCount = (cfg._retryCount ?? 0) + 1;
       if (cfg._retryCount <= MAX_RETRIES) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));

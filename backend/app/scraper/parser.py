@@ -185,7 +185,7 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
     try:
         import pdfplumber
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            pages_text = [p.extract_text() or "" for p in pdf.pages]
+            pages_text = [p.extract_text() or "" for p in pdf.pages[:15]]
             full_text = "\n".join(pages_text)
     except Exception as e:
         logger.warning(f"Erro ao ler PDF: {e}")
