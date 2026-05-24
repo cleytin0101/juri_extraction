@@ -31,8 +31,15 @@ async def _get_or_create_contact(client: httpx.AsyncClient, telefone: str, nome:
     create = await client.post(f"{_base()}/contacts", json={"phone_number": phone, "name": nome or phone})
     if create.is_success:
         data = create.json()
-        return data.get("id") or data.get("payload", {}).get("id")
-    logger.warning(f"[Chatwoot] Falha ao criar contato {phone}: {create.text}")
+        contact_id = (
+            data.get("id")
+            or data.get("payload", {}).get("id")
+            or (data.get("payload", {}).get("contact") or {}).get("id")
+        )
+        if not contact_id:
+            logger.warning(f"[Chatwoot] Contato criado mas ID nao encontrado. Resposta: {str(data)[:300]}")
+        return contact_id
+    logger.warning(f"[Chatwoot] Falha ao criar contato {phone}: {create.status_code} {create.text[:200]}")
     return None
 
 
