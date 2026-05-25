@@ -91,12 +91,16 @@ async def _download_meta_media(media_id: str) -> tuple[bytes, str] | None:
     async with httpx.AsyncClient(timeout=30) as client:
         r2 = await client.get(url, headers=meta_headers)
         cdn_ct = r2.headers.get("content-type", "")
-        logger.info(f"[Chatwoot] CDN status={r2.status_code} bytes={len(r2.content)} mime_meta={meta_mime!r} cdn_ct={cdn_ct!r} media_id={media_id}")
+        magic = r2.content[:16].hex() if r2.content else ""
+        logger.info(f"[Chatwoot] CDN status={r2.status_code} bytes={len(r2.content)} mime_meta={meta_mime!r} cdn_ct={cdn_ct!r} magic={magic!r} media_id={media_id}")
         if not r2.is_success:
             logger.warning(f"[Chatwoot] Falha ao baixar mídia do CDN: status {r2.status_code}")
             return None
         if cdn_ct.startswith("text/"):
             logger.warning(f"[Chatwoot] CDN retornou HTML em vez de mídia: cdn_ct={cdn_ct!r} bytes={len(r2.content)}")
+            return None
+        if len(r2.content) < 500:
+            logger.warning(f"[Chatwoot] CDN retornou conteúdo suspeito (muito pequeno): {len(r2.content)} bytes magic={magic!r}")
             return None
         return r2.content, meta_mime
 
