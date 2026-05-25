@@ -100,9 +100,9 @@ async def receber_webhook(request: Request):
 @router.post("/chatwoot-webhook")
 async def chatwoot_webhook(request: Request):
     """
-    Recebe eventos do Chatwoot (webhook de saída).
-    Quando uma empresa responde, o Chatwoot chama este endpoint.
-    Extrai o número do contato e marca o lead como 'respondido'.
+    Recebe eventos do Chatwoot (webhook de saída do inbox juri_api).
+    - incoming (0): cliente respondeu → marca lead como respondido
+    - outgoing (1): agente respondeu → envia mensagem via WhatsApp
     """
     try:
         body = await request.json()
@@ -114,18 +114,27 @@ async def chatwoot_webhook(request: Request):
         return {"status": "ignored"}
 
     msg_type = body.get("message_type")
-    if msg_type != "incoming":
-        return {"status": "ignored"}
-
     meta = body.get("meta", {})
-    sender = meta.get("sender", {})
-    phone = sender.get("phone_number") or ""
-    if not phone:
-        return {"status": "no_phone"}
+    phone = (meta.get("sender", {}).get("phone_number") or "").strip()
 
-    logger.info(f"[Chatwoot Webhook] Resposta recebida de {phone}")
-    _marcar_lead_respondido(phone)
-    return {"status": "ok"}
+    if msg_type in ("incoming", 0):
+        if phone:
+            logger.info(f"[Chatwoot Webhook] Mensagem recebida de {phone}")
+            _marcar_lead_respondido(phone)
+        return {"status": "ok"}
+
+    if msg_type in ("outgoing", 1):
+        if body.get("private"):
+            return {"status": "ignored"}
+        content = (body.get("content") or "").strip()
+        if not content or not phone:
+            return {"status": "ignored"}
+        from ..services.whatsapp.meta_cloud_provider import send_text_message
+        logger.info(f"[Chatwoot Webhook] Agente respondeu para {phone}: {content[:80]}")
+        result = await send_text_message(phone, content)
+        return {"status": "ok" if result.get("success") else "error"}
+
+    return {"status": "ignored"}
 
 
 def _marcar_lead_respondido(telefone: str) -> None:

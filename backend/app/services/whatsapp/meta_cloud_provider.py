@@ -58,3 +58,31 @@ class MetaCloudProvider(WhatsAppProvider):
         # O Meta não expõe endpoint de consulta de status individual.
         # Status chegam via webhook. Retornamos 'sent' como padrão.
         return "sent"
+
+
+async def send_text_message(telefone: str, texto: str) -> dict:
+    """Envia mensagem de texto livre via Meta Cloud API (dentro da janela de 24h)."""
+    url = f"{GRAPH_API_URL}/{settings.meta_phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {settings.meta_access_token}",
+        "Content-Type": "application/json",
+    }
+    numero = telefone.lstrip("+")
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "type": "text",
+        "text": {"body": texto},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            logger.info(f"[MetaCloud] Texto enviado → {telefone}")
+            return {"success": True}
+    except httpx.HTTPStatusError as exc:
+        logger.error(f"[MetaCloud] Erro ao enviar texto para {telefone}: {exc.response.text}")
+        return {"success": False, "erro": exc.response.text}
+    except Exception as exc:
+        logger.error(f"[MetaCloud] Erro ao enviar texto para {telefone}: {exc}")
+        return {"success": False, "erro": str(exc)}
