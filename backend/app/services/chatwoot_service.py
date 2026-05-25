@@ -82,8 +82,7 @@ async def _download_meta_media(media_id: str) -> bytes | None:
         if not url:
             logger.warning(f"[Chatwoot] URL de mídia ausente na resposta para {media_id}")
             return None
-        # CDN URL é pré-autenticada via query params — não passar Authorization
-        r2 = await client.get(url)
+        r2 = await client.get(url, headers=meta_headers)
         logger.info(f"[Chatwoot] CDN status={r2.status_code} bytes={len(r2.content)} media_id={media_id}")
         if not r2.is_success:
             logger.warning(f"[Chatwoot] Falha ao baixar mídia do CDN: status {r2.status_code}")
