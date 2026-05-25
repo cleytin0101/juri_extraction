@@ -47,8 +47,9 @@ async def _get_or_create_conversation(client: httpx.AsyncClient, contact_id: int
     convs = await client.get(f"{_base()}/contacts/{contact_id}/conversations")
     if convs.is_success:
         items = convs.json().get("payload", [])
-        if items:
-            return items[0]["id"]
+        matching = [c for c in items if c.get("inbox_id") == int(settings.chatwoot_inbox_id)]
+        if matching:
+            return matching[0]["id"]
 
     create = await client.post(f"{_base()}/conversations", json={
         "contact_id": contact_id,
