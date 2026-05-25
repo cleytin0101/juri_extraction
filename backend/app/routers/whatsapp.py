@@ -173,18 +173,31 @@ async def chatwoot_webhook(request: Request):
     return {"status": "ignored"}
 
 
+_EXT_MIME = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+    "gif": "image/gif", "webp": "image/webp",
+    "mp4": "video/mp4", "3gp": "video/3gpp",
+    "ogg": "audio/ogg", "mp3": "audio/mpeg", "aac": "audio/aac",
+    "amr": "audio/amr", "m4a": "audio/mp4", "webm": "video/webm",
+    "pdf": "application/pdf",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
 async def _send_attachment_to_whatsapp(phone: str, chatwoot_url: str, file_type: str, ext: str) -> dict:
     """Baixa attachment do Chatwoot e envia via Meta Cloud API para o WhatsApp do cliente."""
     import httpx as _httpx
 
     cw_headers = {"api_access_token": settings.chatwoot_api_token}
     try:
-        async with _httpx.AsyncClient(timeout=30) as client:
+        async with _httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
             dl = await client.get(chatwoot_url, headers=cw_headers)
         if not dl.is_success:
             return {"success": False, "erro": f"download falhou: {dl.status_code}"}
         file_bytes = dl.content
-        content_type = dl.headers.get("content-type", "application/octet-stream").split(";")[0]
+        mime_type = _EXT_MIME.get(ext.lower(), "application/octet-stream")
+        logger.info(f"[CW→WA] Baixados {len(file_bytes)} bytes de Chatwoot, mime={mime_type}, ext={ext}")
     except Exception as exc:
         return {"success": False, "erro": f"download error: {exc}"}
 
@@ -195,8 +208,8 @@ async def _send_attachment_to_whatsapp(phone: str, chatwoot_url: str, file_type:
         async with _httpx.AsyncClient(timeout=30) as client:
             up = await client.post(
                 upload_url,
-                data={"messaging_product": "whatsapp", "type": content_type},
-                files={"file": (fname, file_bytes, content_type)},
+                data={"messaging_product": "whatsapp", "type": mime_type},
+                files={"file": (fname, file_bytes, mime_type)},
                 headers=meta_auth,
             )
         if not up.is_success:

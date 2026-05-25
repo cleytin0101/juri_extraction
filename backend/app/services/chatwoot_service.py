@@ -73,7 +73,7 @@ async def _get_or_create_conversation(client: httpx.AsyncClient, contact_id: int
 
 async def _download_meta_media(media_id: str) -> bytes | None:
     headers = {"Authorization": f"Bearer {settings.meta_access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         r = await client.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=headers)
         if not r.is_success:
             logger.warning(f"[Chatwoot] Falha ao obter URL da mídia {media_id}: {r.text[:200]}")
@@ -82,7 +82,11 @@ async def _download_meta_media(media_id: str) -> bytes | None:
         if not url:
             return None
         r2 = await client.get(url, headers=headers)
-        return r2.content if r2.is_success else None
+        if not r2.is_success:
+            logger.warning(f"[Chatwoot] Falha ao baixar mídia {media_id}: status {r2.status_code}")
+            return None
+        logger.info(f"[Chatwoot] Baixados {len(r2.content)} bytes para media_id={media_id}")
+        return r2.content
 
 
 async def registrar_midia_recebida(telefone: str, media_id: str, tipo: str, caption: str = "", filename: str = "") -> None:
