@@ -83,10 +83,29 @@ async def receber_webhook(request: Request):
                 if not telefone_remetente:
                     continue
 
-                texto = message.get("text", {}).get("body", "(mensagem recebida)")
-                logger.info(f"[Webhook Meta] Mensagem recebida de {telefone_remetente}")
                 _marcar_lead_respondido(telefone_remetente)
-                await chatwoot_service.registrar_mensagem_recebida(telefone_remetente, texto)
+                tipo = message.get("type", "text")
+                logger.info(f"[Webhook Meta] Mensagem recebida de {telefone_remetente} tipo={tipo}")
+
+                if tipo == "text":
+                    texto = message.get("text", {}).get("body", "") or "(mensagem recebida)"
+                    await chatwoot_service.registrar_mensagem_recebida(telefone_remetente, texto)
+                elif tipo in ("audio", "image", "video", "document", "sticker"):
+                    media_id = (message.get(tipo) or {}).get("id")
+                    caption = (message.get("image") or message.get("video") or {}).get("caption", "")
+                    filename = (message.get("document") or {}).get("filename", "")
+                    if media_id:
+                        await chatwoot_service.registrar_midia_recebida(
+                            telefone=telefone_remetente,
+                            media_id=media_id,
+                            tipo=tipo,
+                            caption=caption,
+                            filename=filename,
+                        )
+                    else:
+                        await chatwoot_service.registrar_mensagem_recebida(telefone_remetente, f"[{tipo} recebido]")
+                else:
+                    await chatwoot_service.registrar_mensagem_recebida(telefone_remetente, f"[{tipo} recebido]")
 
             # Atualizações de status de entrega/leitura
             for status_update in value.get("statuses", []):
@@ -127,21 +146,87 @@ async def chatwoot_webhook(request: Request):
         if body.get("private"):
             return {"status": "ignored"}
         content = (body.get("content") or "").strip()
-        if not content:
+        attachments = body.get("attachments") or []
+        if not content and not attachments:
             return {"status": "ignored"}
         # telefone do contato pode estar em meta.sender OU conversation.meta.sender
         conv_meta = body.get("conversation", {}).get("meta", {})
         phone = phone or (conv_meta.get("sender", {}).get("phone_number") or "").strip()
-        logger.info(f"[Chatwoot Webhook] Outgoing — phone={phone!r} content={content[:60]!r}")
+        logger.info(f"[Chatwoot Webhook] Outgoing — phone={phone!r} content={content[:60]!r} attachments={len(attachments)}")
         if not phone:
             logger.warning("[Chatwoot Webhook] Mensagem outgoing sem telefone do contato")
             return {"status": "no_phone"}
-        from ..services.whatsapp.meta_cloud_provider import send_text_message
-        result = await send_text_message(phone, content)
-        logger.info(f"[Chatwoot Webhook] Resultado envio para {phone}: {result}")
-        return {"status": "ok" if result.get("success") else "error"}
+        if attachments:
+            for att in attachments:
+                att_url = att.get("data_url", "")
+                file_type = att.get("file_type", "document")
+                ext = att.get("extension", "")
+                if att_url:
+                    result = await _send_attachment_to_whatsapp(phone, att_url, file_type, ext)
+                    logger.info(f"[Chatwoot Webhook] Attachment {file_type} → {phone}: {result}")
+        if content:
+            from ..services.whatsapp.meta_cloud_provider import send_text_message
+            result = await send_text_message(phone, content)
+            logger.info(f"[Chatwoot Webhook] Resultado envio texto para {phone}: {result}")
+        return {"status": "ok"}
 
     return {"status": "ignored"}
+
+
+async def _send_attachment_to_whatsapp(phone: str, chatwoot_url: str, file_type: str, ext: str) -> dict:
+    """Baixa attachment do Chatwoot e envia via Meta Cloud API para o WhatsApp do cliente."""
+    import httpx as _httpx
+
+    cw_headers = {"api_access_token": settings.chatwoot_api_token}
+    try:
+        async with _httpx.AsyncClient(timeout=30) as client:
+            dl = await client.get(chatwoot_url, headers=cw_headers)
+        if not dl.is_success:
+            return {"success": False, "erro": f"download falhou: {dl.status_code}"}
+        file_bytes = dl.content
+        content_type = dl.headers.get("content-type", "application/octet-stream").split(";")[0]
+    except Exception as exc:
+        return {"success": False, "erro": f"download error: {exc}"}
+
+    meta_auth = {"Authorization": f"Bearer {settings.meta_access_token}"}
+    upload_url = f"https://graph.facebook.com/v19.0/{settings.meta_phone_number_id}/media"
+    fname = f"file.{ext}" if ext else "file"
+    try:
+        async with _httpx.AsyncClient(timeout=30) as client:
+            up = await client.post(
+                upload_url,
+                data={"messaging_product": "whatsapp", "type": content_type},
+                files={"file": (fname, file_bytes, content_type)},
+                headers=meta_auth,
+            )
+        if not up.is_success:
+            return {"success": False, "erro": f"upload meta falhou: {up.text[:200]}"}
+        media_id = up.json().get("id")
+        if not media_id:
+            return {"success": False, "erro": "media_id não retornado pelo Meta"}
+    except Exception as exc:
+        return {"success": False, "erro": f"upload error: {exc}"}
+
+    wa_type = {"audio": "audio", "image": "image", "video": "video", "document": "document"}.get(file_type, "document")
+    numero = phone.lstrip("+")
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "type": wa_type,
+        wa_type: {"id": media_id},
+    }
+    try:
+        async with _httpx.AsyncClient(timeout=15) as client:
+            send = await client.post(
+                f"https://graph.facebook.com/v19.0/{settings.meta_phone_number_id}/messages",
+                json=payload,
+                headers={**meta_auth, "Content-Type": "application/json"},
+            )
+        if send.is_success:
+            return {"success": True}
+        return {"success": False, "erro": send.text[:200]}
+    except Exception as exc:
+        return {"success": False, "erro": f"send error: {exc}"}
 
 
 def _marcar_lead_respondido(telefone: str) -> None:

@@ -3,6 +3,15 @@ import httpx
 
 from ..config import settings
 
+_META_MIME = {
+    "audio": "audio/ogg",
+    "image": "image/jpeg",
+    "video": "video/mp4",
+    "document": "application/octet-stream",
+    "sticker": "image/webp",
+}
+_META_EXT = {"audio": "ogg", "image": "jpg", "video": "mp4", "document": "bin", "sticker": "webp"}
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +69,52 @@ async def _get_or_create_conversation(client: httpx.AsyncClient, contact_id: int
         return data.get("id") or data.get("payload", {}).get("id")
     logger.warning(f"[Chatwoot] Falha ao criar conversa para contato {contact_id}: {create.text}")
     return None
+
+
+async def _download_meta_media(media_id: str) -> bytes | None:
+    headers = {"Authorization": f"Bearer {settings.meta_access_token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=headers)
+        if not r.is_success:
+            logger.warning(f"[Chatwoot] Falha ao obter URL da mídia {media_id}: {r.text[:200]}")
+            return None
+        url = r.json().get("url")
+        if not url:
+            return None
+        r2 = await client.get(url, headers=headers)
+        return r2.content if r2.is_success else None
+
+
+async def registrar_midia_recebida(telefone: str, media_id: str, tipo: str, caption: str = "", filename: str = "") -> None:
+    if not _enabled():
+        return
+    fallback = f"[{tipo} recebido]" + (f": {caption}" if caption else "")
+    try:
+        file_bytes = await _download_meta_media(media_id)
+        if not file_bytes:
+            await registrar_mensagem_recebida(telefone, fallback)
+            return
+        mime = _META_MIME.get(tipo, "application/octet-stream")
+        ext = _META_EXT.get(tipo, "bin")
+        fname = filename or f"{tipo}.{ext}"
+        async with httpx.AsyncClient(headers={"api_access_token": settings.chatwoot_api_token}, timeout=30) as client:
+            contact_id = await _get_or_create_contact(client, telefone, telefone)
+            if not contact_id:
+                return
+            conv_id = await _get_or_create_conversation(client, contact_id)
+            if not conv_id:
+                return
+            files = {"attachments[]": (fname, file_bytes, mime)}
+            data = {"message_type": "incoming", "private": "false", "content": caption or ""}
+            resp = await client.post(f"{_base()}/conversations/{conv_id}/messages", data=data, files=files)
+            if resp.is_success:
+                logger.info(f"[Chatwoot] Mídia {tipo} registrada — conversa {conv_id}")
+            else:
+                logger.warning(f"[Chatwoot] Falha ao registrar mídia — {resp.status_code}: {resp.text[:300]}")
+                await registrar_mensagem_recebida(telefone, fallback)
+    except Exception as exc:
+        logger.error(f"[Chatwoot] Erro ao registrar mídia de {telefone}: {exc}")
+        await registrar_mensagem_recebida(telefone, fallback)
 
 
 async def registrar_mensagem_recebida(telefone: str, texto: str) -> None:
