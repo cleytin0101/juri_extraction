@@ -71,23 +71,25 @@ async def _get_or_create_conversation(client: httpx.AsyncClient, contact_id: int
     return None
 
 
-async def _download_meta_media(media_id: str) -> bytes | None:
+async def _download_meta_media(media_id: str) -> tuple[bytes, str] | None:
     meta_headers = {"Authorization": f"Bearer {settings.meta_access_token}"}
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         r = await client.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=meta_headers)
         if not r.is_success:
             logger.warning(f"[Chatwoot] Falha ao obter URL da mídia {media_id}: {r.text[:200]}")
             return None
-        url = r.json().get("url")
+        meta_json = r.json()
+        url = meta_json.get("url")
+        meta_mime = meta_json.get("mime_type", "")
         if not url:
             logger.warning(f"[Chatwoot] URL de mídia ausente na resposta para {media_id}")
             return None
         r2 = await client.get(url, headers=meta_headers)
-        logger.info(f"[Chatwoot] CDN status={r2.status_code} bytes={len(r2.content)} media_id={media_id}")
+        logger.info(f"[Chatwoot] CDN status={r2.status_code} bytes={len(r2.content)} mime_meta={meta_mime!r} media_id={media_id}")
         if not r2.is_success:
             logger.warning(f"[Chatwoot] Falha ao baixar mídia do CDN: status {r2.status_code}")
             return None
-        return r2.content
+        return r2.content, meta_mime
 
 
 async def registrar_midia_recebida(telefone: str, media_id: str, tipo: str, caption: str = "", filename: str = "") -> None:
@@ -95,13 +97,15 @@ async def registrar_midia_recebida(telefone: str, media_id: str, tipo: str, capt
         return
     fallback = f"[{tipo} recebido]" + (f": {caption}" if caption else "")
     try:
-        file_bytes = await _download_meta_media(media_id)
-        if not file_bytes:
+        result = await _download_meta_media(media_id)
+        if not result:
             await registrar_mensagem_recebida(telefone, fallback)
             return
-        mime = _META_MIME.get(tipo, "application/octet-stream")
+        file_bytes, meta_mime = result
+        mime = meta_mime or _META_MIME.get(tipo, "application/octet-stream")
         ext = _META_EXT.get(tipo, "bin")
         fname = filename or f"{tipo}.{ext}"
+        logger.info(f"[Chatwoot] Upload para Chatwoot: tipo={tipo} mime={mime!r} bytes={len(file_bytes)} fname={fname!r}")
         async with httpx.AsyncClient(headers={"api_access_token": settings.chatwoot_api_token}, timeout=30) as client:
             contact_id = await _get_or_create_contact(client, telefone, telefone)
             if not contact_id:
