@@ -92,7 +92,7 @@ async def _download_meta_media(media_id: str) -> tuple[bytes, str] | None:
         r2 = await client.get(url, headers=meta_headers)
         cdn_ct = r2.headers.get("content-type", "")
         magic = r2.content[:16].hex() if r2.content else ""
-        logger.info(f"[Chatwoot] CDN status={r2.status_code} bytes={len(r2.content)} mime_meta={meta_mime!r} cdn_ct={cdn_ct!r} magic={magic!r} media_id={media_id}")
+        logger.warning(f"[Chatwoot] CDN status={r2.status_code} bytes={len(r2.content)} mime_meta={meta_mime!r} cdn_ct={cdn_ct!r} magic={magic!r} media_id={media_id}")
         if not r2.is_success:
             logger.warning(f"[Chatwoot] Falha ao baixar mídia do CDN: status {r2.status_code}")
             return None
@@ -123,7 +123,7 @@ async def registrar_midia_recebida(telefone: str, media_id: str, tipo: str, capt
         mime = raw_mime.split(";")[0].strip()
         ext = _META_EXT.get(tipo, "bin")
         fname = filename or f"{tipo}.{ext}"
-        logger.info(f"[Chatwoot] Upload Chatwoot: tipo={tipo} mime={mime!r} bytes={len(file_bytes)} fname={fname!r}")
+        logger.warning(f"[Chatwoot] Upload Chatwoot: tipo={tipo} mime={mime!r} bytes={len(file_bytes)} fname={fname!r}")
         async with httpx.AsyncClient(headers={"api_access_token": settings.chatwoot_api_token}, timeout=30) as client:
             contact_id = await _get_or_create_contact(client, telefone, telefone)
             if not contact_id:
