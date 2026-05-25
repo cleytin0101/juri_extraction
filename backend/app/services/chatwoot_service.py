@@ -72,20 +72,22 @@ async def _get_or_create_conversation(client: httpx.AsyncClient, contact_id: int
 
 
 async def _download_meta_media(media_id: str) -> bytes | None:
-    headers = {"Authorization": f"Bearer {settings.meta_access_token}"}
+    meta_headers = {"Authorization": f"Bearer {settings.meta_access_token}"}
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        r = await client.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=headers)
+        r = await client.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=meta_headers)
         if not r.is_success:
             logger.warning(f"[Chatwoot] Falha ao obter URL da mídia {media_id}: {r.text[:200]}")
             return None
         url = r.json().get("url")
         if not url:
+            logger.warning(f"[Chatwoot] URL de mídia ausente na resposta para {media_id}")
             return None
-        r2 = await client.get(url, headers=headers)
+        # CDN URL é pré-autenticada via query params — não passar Authorization
+        r2 = await client.get(url)
+        logger.info(f"[Chatwoot] CDN status={r2.status_code} bytes={len(r2.content)} media_id={media_id}")
         if not r2.is_success:
-            logger.warning(f"[Chatwoot] Falha ao baixar mídia {media_id}: status {r2.status_code}")
+            logger.warning(f"[Chatwoot] Falha ao baixar mídia do CDN: status {r2.status_code}")
             return None
-        logger.info(f"[Chatwoot] Baixados {len(r2.content)} bytes para media_id={media_id}")
         return r2.content
 
 

@@ -157,6 +157,7 @@ async def chatwoot_webhook(request: Request):
             logger.warning("[Chatwoot Webhook] Mensagem outgoing sem telefone do contato")
             return {"status": "no_phone"}
         if attachments:
+            logger.info(f"[Chatwoot Webhook] Attachments recebidos: {[{k: v for k, v in a.items() if k in ('file_type', 'extension', 'data_url')} for a in attachments]}")
             for att in attachments:
                 att_url = att.get("data_url", "")
                 file_type = att.get("file_type", "document")
@@ -188,6 +189,13 @@ _EXT_MIME = {
 async def _send_attachment_to_whatsapp(phone: str, chatwoot_url: str, file_type: str, ext: str) -> dict:
     """Baixa attachment do Chatwoot e envia via Meta Cloud API para o WhatsApp do cliente."""
     import httpx as _httpx
+
+    logger.info(f"[CW→WA] Iniciando: file_type={file_type!r} ext={ext!r} url={chatwoot_url[:100]!r}")
+
+    # WebM não é suportado pelo WhatsApp para áudio
+    if file_type == "audio" and ext.lower() == "webm":
+        logger.warning("[CW→WA] Formato WebM não suportado pelo WhatsApp — áudio não enviado")
+        return {"success": False, "erro": "Formato WebM não suportado pelo WhatsApp. Envie em OGG, MP3 ou AAC."}
 
     cw_headers = {"api_access_token": settings.chatwoot_api_token}
     try:
