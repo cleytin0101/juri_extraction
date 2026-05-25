@@ -73,6 +73,8 @@ async def _get_or_create_conversation(client: httpx.AsyncClient, contact_id: int
 
 async def _download_meta_media(media_id: str) -> tuple[bytes, str] | None:
     meta_headers = {"Authorization": f"Bearer {settings.meta_access_token}"}
+
+    # Passo 1: obter URL pre-assinada do Meta Graph API
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         r = await client.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=meta_headers)
         if not r.is_success:
@@ -82,13 +84,19 @@ async def _download_meta_media(media_id: str) -> tuple[bytes, str] | None:
         url = meta_json.get("url")
         meta_mime = meta_json.get("mime_type", "")
         if not url:
-            logger.warning(f"[Chatwoot] URL de mídia ausente na resposta para {media_id}")
+            logger.warning(f"[Chatwoot] URL de mídia ausente para {media_id}")
             return None
+
+    # Passo 2: baixar do CDN sem follow_redirects (evita propagar Authorization em redirects)
+    async with httpx.AsyncClient(timeout=30) as client:
         r2 = await client.get(url, headers=meta_headers)
         cdn_ct = r2.headers.get("content-type", "")
         logger.info(f"[Chatwoot] CDN status={r2.status_code} bytes={len(r2.content)} mime_meta={meta_mime!r} cdn_ct={cdn_ct!r} media_id={media_id}")
         if not r2.is_success:
             logger.warning(f"[Chatwoot] Falha ao baixar mídia do CDN: status {r2.status_code}")
+            return None
+        if cdn_ct.startswith("text/"):
+            logger.warning(f"[Chatwoot] CDN retornou HTML em vez de mídia: cdn_ct={cdn_ct!r} bytes={len(r2.content)}")
             return None
         return r2.content, meta_mime
 
