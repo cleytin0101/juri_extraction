@@ -74,12 +74,15 @@ async def registrar_mensagem_recebida(telefone: str, texto: str) -> None:
             if not conv_id:
                 logger.warning(f"[Chatwoot] Não foi possível obter/criar conversa para contato {contact_id}")
                 return
-            await client.post(f"{_base()}/conversations/{conv_id}/messages", json={
+            resp = await client.post(f"{_base()}/conversations/{conv_id}/messages", json={
                 "content": texto,
                 "message_type": "incoming",
                 "private": False,
             })
-            logger.info(f"[Chatwoot] Mensagem recebida registrada — conversa {conv_id}")
+            if resp.is_success:
+                logger.info(f"[Chatwoot] Mensagem recebida registrada — conversa {conv_id}")
+            else:
+                logger.warning(f"[Chatwoot] Falha ao registrar mensagem recebida — status {resp.status_code}: {resp.text[:300]}")
     except Exception as exc:
         logger.error(f"[Chatwoot] Erro ao registrar mensagem recebida de {telefone}: {exc}")
 
