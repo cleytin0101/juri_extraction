@@ -127,11 +127,18 @@ async def chatwoot_webhook(request: Request):
         if body.get("private"):
             return {"status": "ignored"}
         content = (body.get("content") or "").strip()
-        if not content or not phone:
+        if not content:
             return {"status": "ignored"}
+        # telefone do contato pode estar em meta.sender OU conversation.meta.sender
+        conv_meta = body.get("conversation", {}).get("meta", {})
+        phone = phone or (conv_meta.get("sender", {}).get("phone_number") or "").strip()
+        logger.info(f"[Chatwoot Webhook] Outgoing — phone={phone!r} content={content[:60]!r}")
+        if not phone:
+            logger.warning("[Chatwoot Webhook] Mensagem outgoing sem telefone do contato")
+            return {"status": "no_phone"}
         from ..services.whatsapp.meta_cloud_provider import send_text_message
-        logger.info(f"[Chatwoot Webhook] Agente respondeu para {phone}: {content[:80]}")
         result = await send_text_message(phone, content)
+        logger.info(f"[Chatwoot Webhook] Resultado envio para {phone}: {result}")
         return {"status": "ok" if result.get("success") else "error"}
 
     return {"status": "ignored"}
