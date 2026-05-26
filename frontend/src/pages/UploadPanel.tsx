@@ -363,6 +363,7 @@ export function UploadPanel() {
                 <span className="text-accent-green font-medium">
                   {enviarLote.data.enviados} mensagens enviadas
                   {enviarLote.data.sem_telefone > 0 && ` · ${enviarLote.data.sem_telefone} sem telefone`}
+                  {(enviarLote.data as any).ja_contatados > 0 && ` · ${(enviarLote.data as any).ja_contatados} já contatados (24h)`}
                   {enviarLote.data.erros > 0 && ` · ${enviarLote.data.erros} erros`}
                 </span>
               </div>

@@ -1,4 +1,5 @@
 from typing import Optional, List
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from ..services import lead_service
@@ -6,6 +7,7 @@ from ..services.whatsapp import get_whatsapp_provider
 from ..services.whatsapp.template import render_mensagem
 from ..services import chatwoot_service
 from ..config import settings
+from ..database import get_supabase
 
 router = APIRouter(prefix="/api/leads", tags=["mensagem"])
 
@@ -68,14 +70,19 @@ async def enviar_mensagem_lote(body: LoteRequest):
     """
     Envia mensagens WhatsApp para uma lista de leads em sequência.
     Retorna relatório com enviados, sem_telefone e erros.
+    Cooldown de 24h por número: não reenvia para telefone que já recebeu mensagem recentemente.
     """
     if not body.lead_ids:
         raise HTTPException(status_code=422, detail="Lista de lead_ids vazia.")
 
+    sb = get_supabase()
     provider = get_whatsapp_provider()
     enviados = []
     sem_telefone = []
     erros = []
+    ja_contatados = []
+
+    cooldown_desde = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
 
     for lead_id in body.lead_ids:
         lead = lead_service.get_lead_full(lead_id)
@@ -88,6 +95,20 @@ async def enviar_mensagem_lote(body: LoteRequest):
 
         if not telefone:
             sem_telefone.append(lead_id)
+            continue
+
+        # Cooldown: pula se este telefone já recebeu mensagem com sucesso nas últimas 24h
+        recente = (
+            sb.table("mensagens_log")
+            .select("id")
+            .eq("telefone", telefone)
+            .eq("status", "sent")
+            .gte("created_at", cooldown_desde)
+            .limit(1)
+            .execute()
+        )
+        if recente.data:
+            ja_contatados.append(lead_id)
             continue
 
         try:
@@ -121,6 +142,7 @@ async def enviar_mensagem_lote(body: LoteRequest):
         "total": len(body.lead_ids),
         "enviados": len(enviados),
         "sem_telefone": len(sem_telefone),
+        "ja_contatados": len(ja_contatados),
         "erros": len(erros),
         "detalhes_erros": erros,
     }
