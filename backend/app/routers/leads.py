@@ -47,5 +47,14 @@ def update_status(lead_id: str, body: LeadStatusUpdate):
 @router.delete("/{lead_id}")
 def delete_lead(lead_id: str):
     sb = get_supabase()
+    lead_result = sb.table("leads").select("processo_id, empresa_id").eq("id", lead_id).execute()
+    if not lead_result.data:
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
+    processo_id = lead_result.data[0].get("processo_id")
+    empresa_id = lead_result.data[0].get("empresa_id")
     sb.table("leads").delete().eq("id", lead_id).execute()
+    if empresa_id:
+        sb.table("empresas").delete().eq("id", empresa_id).execute()
+    if processo_id:
+        sb.table("processos").delete().eq("id", processo_id).execute()
     return {"ok": True, "lead_id": lead_id}
