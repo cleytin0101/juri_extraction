@@ -87,6 +87,15 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   );
 }
 
+const RESPONSAVEIS = ["Fernanda", "Vinícius", "Diego", "Cleyton"] as const;
+
+const RESPONSAVEL_COLORS: Record<string, string> = {
+  Fernanda: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  "Vinícius": "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  Diego: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  Cleyton: "bg-green-500/20 text-green-300 border-green-500/30",
+};
+
 function fmtDateTime(iso: string) {
   return new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit", month: "2-digit", year: "numeric",
@@ -105,6 +114,11 @@ function BatchItem({ batch }: { batch: UploadBatch }) {
         <div className="flex items-center gap-4 text-sm">
           {expanded ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
           <span className="text-slate-400 font-mono text-xs">{fmtDateTime(batch.created_at)}</span>
+          {batch.responsavel && (
+            <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium border", RESPONSAVEL_COLORS[batch.responsavel] ?? "bg-white/5 text-slate-300 border-white/10")}>
+              {batch.responsavel}
+            </span>
+          )}
           <span className="text-white font-medium">{batch.total_arquivos} arquivo{batch.total_arquivos !== 1 ? "s" : ""}</span>
           <span className="text-accent-green text-xs">{batch.criados} criados</span>
           {batch.ja_existentes > 0 && <span className="text-yellow-400 text-xs">{batch.ja_existentes} já existiam</span>}
@@ -184,14 +198,21 @@ export function UploadPanel() {
   const [aba, setAba] = useState<"upload" | "historico">("upload");
   const [resultados, setResultados] = useState<DocumentoProcessado[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [responsavel, setResponsavel] = useState<string>("");
+  const [semResponsavelAviso, setSemResponsavelAviso] = useState(false);
 
   const upload = useUploadDocumentos();
   const enviarLote = useEnviarLote();
 
   const handleFiles = async (files: File[]) => {
+    if (!responsavel) {
+      setSemResponsavelAviso(true);
+      return;
+    }
+    setSemResponsavelAviso(false);
     setResultados([]);
     setSelectedIds(new Set());
-    const data = await upload.mutateAsync(files);
+    const data = await upload.mutateAsync({ files, responsavel });
     setResultados(data);
     // Pré-selecionar todos os leads criados com telefone
     const ids = new Set(
@@ -252,6 +273,33 @@ export function UploadPanel() {
 
         {/* Aba Upload */}
         {aba === "upload" && <>
+
+        {/* Seletor de responsável */}
+        <div className="space-y-2">
+          <p className="text-sm text-slate-400 font-medium">Quem está fazendo o upload?</p>
+          <div className="flex flex-wrap gap-2">
+            {RESPONSAVEIS.map((nome) => (
+              <button
+                key={nome}
+                onClick={() => { setResponsavel(nome); setSemResponsavelAviso(false); }}
+                className={cn(
+                  "px-4 py-2 rounded-lg text-sm font-medium border transition-all",
+                  responsavel === nome
+                    ? RESPONSAVEL_COLORS[nome]
+                    : "bg-white/[0.03] text-slate-400 border-white/10 hover:border-white/20 hover:text-white"
+                )}
+              >
+                {nome}
+              </button>
+            ))}
+          </div>
+          {semResponsavelAviso && (
+            <p className="text-xs text-amber-400 flex items-center gap-1">
+              <AlertTriangle size={12} /> Selecione quem está fazendo o upload antes de enviar os arquivos.
+            </p>
+          )}
+        </div>
+
         {/* Drop zone */}
         <DropZone onFiles={handleFiles} />
 

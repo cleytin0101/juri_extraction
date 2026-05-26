@@ -35,6 +35,7 @@ class Lead(BaseModel):
     empresa_email: Optional[str] = None
     vara_nome: Optional[str] = None
     vara_codigo: Optional[str] = None
+    responsavel: Optional[str] = None
 
 
 class LeadStatusUpdate(BaseModel):

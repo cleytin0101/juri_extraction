@@ -1,11 +1,12 @@
 import client from "./client";
 import type { DocumentoProcessado, LoteRequest, LoteResult, UploadBatch, UploadHistoricoResponse } from "../types/documento";
 
-export async function uploadDocumentos(files: File[]): Promise<DocumentoProcessado[]> {
+export async function uploadDocumentos(files: File[], responsavel: string): Promise<DocumentoProcessado[]> {
   const form = new FormData();
   for (const file of files) {
     form.append("files", file);
   }
+  form.append("responsavel", responsavel);
   const { data } = await client.post<DocumentoProcessado[]>("/documentos/upload", form, {
     headers: { "Content-Type": "multipart/form-data" },
     timeout: 240_000,

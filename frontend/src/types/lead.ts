@@ -27,6 +27,7 @@ export interface Lead {
   empresa_email: string | null;
   vara_nome: string | null;
   vara_codigo: string | null;
+  responsavel: string | null;
 }
 
 export interface LeadListResponse {

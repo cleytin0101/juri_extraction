@@ -11,7 +11,7 @@ from ..services.storage_service import upload_pdf, pdf_expires_at
 logger = logging.getLogger(__name__)
 
 
-async def process_document(pdf_bytes: bytes, filename: str) -> dict:
+async def process_document(pdf_bytes: bytes, filename: str, responsavel: str | None = None) -> dict:
     """
     Processa um PDF de processo judicial:
     1. Extrai campos com pdfplumber
@@ -157,6 +157,7 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
             "processo_id": processo_id,
             "empresa_id": empresa_id,
             "status": lead_status,
+            "responsavel": responsavel,
         }).execute()
         result["lead_id"] = lead_result.data[0]["id"] if lead_result.data else None
         result["status"] = "criado"

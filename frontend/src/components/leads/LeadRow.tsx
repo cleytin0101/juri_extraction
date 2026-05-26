@@ -1,5 +1,12 @@
 import { useState } from "react";
 import { MessageCircle, FileText, UserCheck, UserX, Phone, Trash2, Eye } from "lucide-react";
+
+const RESPONSAVEL_COLORS: Record<string, string> = {
+  Fernanda: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  "Vinícius": "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  Diego: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  Cleyton: "bg-green-500/20 text-green-300 border-green-500/30",
+};
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { StatusBadge } from "./StatusBadge";
@@ -104,6 +111,15 @@ export function LeadRow({ lead }: { lead: Lead }) {
         </td>
         <td className="px-4 py-3">
           <StatusBadge status={lead.status} />
+        </td>
+        <td className="px-4 py-3">
+          {lead.responsavel ? (
+            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium border ${RESPONSAVEL_COLORS[lead.responsavel] ?? "bg-white/5 text-slate-400 border-white/10"}`}>
+              {lead.responsavel}
+            </span>
+          ) : (
+            <span className="text-gray-600 text-xs">—</span>
+          )}
         </td>
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">

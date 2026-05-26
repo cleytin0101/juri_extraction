@@ -46,20 +46,21 @@ export function LeadTable() {
               <th className="px-4 py-3 text-left">Tipo</th>
               <th className="px-4 py-3 text-left">Valor</th>
               <th className="px-4 py-3 text-left">Status</th>
+              <th className="px-4 py-3 text-left">Responsável</th>
               <th className="px-4 py-3 text-left">Ação</th>
             </tr>
           </thead>
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                   Carregando...
                 </td>
               </tr>
             )}
             {!isLoading && (!data?.items || data.items.length === 0) && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                   Nenhum lead encontrado
                 </td>
               </tr>

@@ -1,6 +1,6 @@
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 
 from ..models.documento import DocumentoProcessado
 from ..services.document_service import process_document
@@ -14,7 +14,10 @@ MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB por arquivo
 
 
 @router.post("/upload", response_model=List[DocumentoProcessado])
-async def upload_documentos(files: List[UploadFile] = File(...)):
+async def upload_documentos(
+    files: List[UploadFile] = File(...),
+    responsavel: Optional[str] = Form(None),
+):
     """
     Recebe um ou mais PDFs de processos judiciais, extrai os dados e cria leads.
     Processa cada arquivo em sequência e retorna o resultado de cada um.
@@ -44,7 +47,7 @@ async def upload_documentos(files: List[UploadFile] = File(...)):
             continue
 
         try:
-            resultado = await process_document(pdf_bytes, filename)
+            resultado = await process_document(pdf_bytes, filename, responsavel=responsavel)
             resultados.append(DocumentoProcessado(**resultado))
         except Exception as e:
             logger.exception(f"Erro inesperado ao processar {filename}: {e}")
@@ -75,6 +78,7 @@ async def upload_documentos(files: List[UploadFile] = File(...)):
             "com_advogado": sum(1 for r in resultados if r.status == "tem_advogado"),
             "erros": sum(1 for r in resultados if r.status == "erro"),
             "arquivos": arquivos_json,
+            "responsavel": responsavel,
         }).execute()
     except Exception as e:
         logger.warning(f"Falha ao salvar histórico do batch: {e}")

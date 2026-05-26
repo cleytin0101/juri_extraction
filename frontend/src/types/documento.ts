@@ -46,6 +46,7 @@ export interface UploadBatch {
   com_advogado: number;
   erros: number;
   arquivos: UploadBatchArquivo[];
+  responsavel: string | null;
 }
 
 export interface UploadHistoricoResponse {

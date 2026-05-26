@@ -5,7 +5,8 @@ import type { LoteRequest } from "../types/documento";
 export function useUploadDocumentos() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (files: File[]) => uploadDocumentos(files),
+    mutationFn: ({ files, responsavel }: { files: File[]; responsavel: string }) =>
+      uploadDocumentos(files, responsavel),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["leads"] });
       queryClient.invalidateQueries({ queryKey: ["metrics"] });
