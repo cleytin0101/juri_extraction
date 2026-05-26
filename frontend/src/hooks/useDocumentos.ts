@@ -25,9 +25,6 @@ export function useUploadDocumentos() {
       for (let i = 0; i < files.length; i += BATCH_SIZE) {
         const batch = files.slice(i, i + BATCH_SIZE);
         await uploadDocumentosStreaming(batch, responsavel, onResult);
-        if (i + BATCH_SIZE < files.length) {
-          await new Promise(r => setTimeout(r, 2500));
-        }
       }
       queryClient.invalidateQueries({ queryKey: ["leads"] });
       queryClient.invalidateQueries({ queryKey: ["metrics"] });

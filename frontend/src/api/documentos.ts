@@ -22,7 +22,23 @@ export async function uploadDocumentosStreaming(
   });
 
   if (!response.ok) {
-    throw new Error(`Erro ao enviar documentos (${response.status})`);
+    const filename = files[0]?.name ?? "documento.pdf";
+    onResult({
+      filename,
+      status: "erro",
+      erro_msg: `Erro ao enviar arquivo (HTTP ${response.status})`,
+      numero_processo: null,
+      empresa_nome: null,
+      empresa_cnpj: null,
+      reclamante_nome: null,
+      telefone: null,
+      telefone_fonte: null,
+      valor_causa: null,
+      resumo_caso: null,
+      tem_advogado: false,
+      lead_id: null,
+    } as DocumentoProcessado);
+    return;
   }
 
   const reader = response.body!.getReader();
