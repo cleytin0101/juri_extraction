@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { uploadDocumentosStreaming, enviarLote, fetchUploadHistorico } from "../api/documentos";
 import type { DocumentoProcessado, LoteRequest } from "../types/documento";
 
-const BATCH_SIZE = 5;
+const BATCH_SIZE = 1;
 
 export function useUploadDocumentos() {
   const queryClient = useQueryClient();

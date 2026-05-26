@@ -43,10 +43,12 @@ async def process_document(pdf_bytes: bytes, filename: str, responsavel: str | N
         result["erro_msg"] = f"Falha ao ler PDF: {e}"
         return result
 
-    # Se os campos-chave não foram encontrados, lê até 40 páginas (Fase 2)
+    # Se os campos-chave não foram encontrados, lê até 12 páginas (Fase 2)
+    # 12 páginas cobre partes + decisão em qualquer ATOrd do PJe sem ler
+    # os certificados ICP-Brasil e assinaturas embutidas nas páginas finais.
     if not (bool(parsed.get("empresa_nome")) and parsed.get("data_audiencia") is not None):
         try:
-            parsed_full = await asyncio.to_thread(parse_pdf_text, pdf_bytes, 40)
+            parsed_full = await asyncio.to_thread(parse_pdf_text, pdf_bytes, 12)
             parsed = parsed_full
         except Exception:
             pass  # usa o resultado parcial da Fase 1
