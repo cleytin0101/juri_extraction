@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documentos", tags=["documentos"])
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB por arquivo
-MAX_CONCURRENT = 8  # arquivos processados em paralelo (evita rate-limit CNPJ.ws)
+MAX_CONCURRENT = 2  # arquivos processados em paralelo (limite de memória 512MB no Render)
 
 
 @router.post("/upload", response_model=List[DocumentoProcessado])
@@ -22,7 +22,7 @@ async def upload_documentos(
 ):
     """
     Recebe um ou mais PDFs de processos judiciais, extrai os dados e cria leads.
-    Processa até 8 arquivos em paralelo para suportar lotes de até 30 arquivos.
+    Processa até 2 arquivos em paralelo para controlar uso de memória no Render (512 MB).
     """
     if not files:
         raise HTTPException(status_code=422, detail="Nenhum arquivo enviado.")
