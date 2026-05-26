@@ -40,7 +40,12 @@ async def upload_documentos(
         erros_retry: list[tuple[str, bytes]] = []
 
         # --- Primeira passagem ---
-        for filename, pdf_bytes in file_data:
+        # Itera por índice para poder zerar os bytes após processar cada arquivo,
+        # evitando acumular todos os PDFs em memória ao mesmo tempo.
+        for i in range(len(file_data)):
+            filename, pdf_bytes = file_data[i]
+            file_data[i] = (filename, b"")  # libera da memória imediatamente
+
             if len(pdf_bytes) == 0:
                 doc = DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo vazio.")
             elif len(pdf_bytes) > MAX_FILE_SIZE:
@@ -65,7 +70,9 @@ async def upload_documentos(
             yield f"data: {doc.model_dump_json()}\n\n"
 
         # --- Retry automático dos que erraram ---
-        for filename, pdf_bytes in erros_retry:
+        for i in range(len(erros_retry)):
+            filename, pdf_bytes = erros_retry[i]
+            erros_retry[i] = (filename, b"")  # libera após processar
             try:
                 resultado = await asyncio.wait_for(
                     process_document(pdf_bytes, filename, responsavel=responsavel),
