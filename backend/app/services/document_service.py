@@ -43,10 +43,10 @@ async def process_document(pdf_bytes: bytes, filename: str, responsavel: str | N
         result["erro_msg"] = f"Falha ao ler PDF: {e}"
         return result
 
-    # Se os campos-chave não foram encontrados, lê o PDF completo (Fase 2)
+    # Se os campos-chave não foram encontrados, lê até 40 páginas (Fase 2)
     if not (bool(parsed.get("empresa_nome")) and parsed.get("data_audiencia") is not None):
         try:
-            parsed_full = await asyncio.to_thread(parse_pdf_text, pdf_bytes)
+            parsed_full = await asyncio.to_thread(parse_pdf_text, pdf_bytes, 40)
             parsed = parsed_full
         except Exception:
             pass  # usa o resultado parcial da Fase 1
@@ -180,9 +180,8 @@ async def process_document(pdf_bytes: bytes, filename: str, responsavel: str | N
 def _extract_text_sample(pdf_bytes: bytes, max_chars: int = 2000) -> str:
     try:
         import io
-        import pdfplumber
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            pages = pdf.pages[:2]
-            return "\n".join(p.extract_text() or "" for p in pages)[:max_chars]
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        return "\n".join(p.extract_text() or "" for p in reader.pages[:2])[:max_chars]
     except Exception:
         return ""

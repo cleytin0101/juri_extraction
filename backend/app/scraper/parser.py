@@ -230,11 +230,12 @@ def parse_pdf_text(pdf_bytes: bytes, max_pages: int | None = None) -> dict:
         "modalidade_audiencia": None,
     }
     try:
-        import pdfplumber
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            pages = pdf.pages[:max_pages] if max_pages else pdf.pages
-            pages_text = [p.extract_text() or "" for p in pages]
-            full_text = "\n".join(pages_text)
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        all_pages = reader.pages
+        pages = all_pages[:max_pages] if max_pages else all_pages
+        pages_text = [p.extract_text() or "" for p in pages]
+        full_text = "\n".join(pages_text)
     except Exception as e:
         logger.warning(f"Erro ao ler PDF: {e}")
         return result
