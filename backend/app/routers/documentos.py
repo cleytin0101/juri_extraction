@@ -1,7 +1,7 @@
-import asyncio
 import logging
-from typing import List, Optional
+from typing import List, Optional, AsyncIterator
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from ..models.documento import DocumentoProcessado
 from ..services.document_service import process_document
@@ -12,67 +12,71 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documentos", tags=["documentos"])
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB por arquivo
-MAX_CONCURRENT = 2  # arquivos processados em paralelo (limite de memória 512MB no Render)
 
 
-@router.post("/upload", response_model=List[DocumentoProcessado])
+@router.post("/upload")
 async def upload_documentos(
     files: List[UploadFile] = File(...),
     responsavel: Optional[str] = Form(None),
 ):
     """
     Recebe um ou mais PDFs de processos judiciais, extrai os dados e cria leads.
-    Processa até 2 arquivos em paralelo para controlar uso de memória no Render (512 MB).
+    Processa um arquivo por vez e transmite cada resultado via SSE assim que termina.
     """
     if not files:
         raise HTTPException(status_code=422, detail="Nenhum arquivo enviado.")
 
-    sem = asyncio.Semaphore(MAX_CONCURRENT)
+    async def generate() -> AsyncIterator[str]:
+        resultados: list[DocumentoProcessado] = []
 
-    async def _process_one(upload: UploadFile) -> DocumentoProcessado:
-        filename = upload.filename or "documento.pdf"
-        pdf_bytes = await upload.read()
-        if len(pdf_bytes) == 0:
-            return DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo vazio.")
-        if len(pdf_bytes) > MAX_FILE_SIZE:
-            return DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo excede o limite de 50 MB.")
-        async with sem:
-            try:
-                resultado = await process_document(pdf_bytes, filename, responsavel=responsavel)
-                return DocumentoProcessado(**resultado)
-            except Exception as e:
-                logger.exception(f"Erro inesperado ao processar {filename}: {e}")
-                return DocumentoProcessado(filename=filename, status="erro", erro_msg=str(e))
+        for upload in files:
+            filename = upload.filename or "documento.pdf"
+            pdf_bytes = await upload.read()
 
-    resultados = list(await asyncio.gather(*[_process_one(upload) for upload in files]))
+            if len(pdf_bytes) == 0:
+                doc = DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo vazio.")
+            elif len(pdf_bytes) > MAX_FILE_SIZE:
+                doc = DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo excede o limite de 50 MB.")
+            else:
+                try:
+                    resultado = await process_document(pdf_bytes, filename, responsavel=responsavel)
+                    doc = DocumentoProcessado(**resultado)
+                except Exception as e:
+                    logger.exception(f"Erro inesperado ao processar {filename}: {e}")
+                    doc = DocumentoProcessado(filename=filename, status="erro", erro_msg=str(e))
 
-    # Salva o batch no histórico de uploads
-    try:
-        sb = get_supabase()
-        arquivos_json = [
-            {
-                "filename": r.filename,
-                "status": r.status,
-                "lead_id": r.lead_id,
-                "empresa_nome": r.empresa_nome,
-                "numero_processo": r.numero_processo,
-                "erro_msg": r.erro_msg,
-            }
-            for r in resultados
-        ]
-        sb.table("upload_batches").insert({
-            "total_arquivos": len(resultados),
-            "criados": sum(1 for r in resultados if r.status == "criado"),
-            "ja_existentes": sum(1 for r in resultados if r.status == "ja_existe"),
-            "com_advogado": sum(1 for r in resultados if r.status == "tem_advogado"),
-            "erros": sum(1 for r in resultados if r.status == "erro"),
-            "arquivos": arquivos_json,
-            "responsavel": responsavel,
-        }).execute()
-    except Exception as e:
-        logger.warning(f"Falha ao salvar histórico do batch: {e}")
+            resultados.append(doc)
+            yield f"data: {doc.model_dump_json()}\n\n"
 
-    return resultados
+        # Salva o batch no histórico de uploads
+        try:
+            sb = get_supabase()
+            arquivos_json = [
+                {
+                    "filename": r.filename,
+                    "status": r.status,
+                    "lead_id": r.lead_id,
+                    "empresa_nome": r.empresa_nome,
+                    "numero_processo": r.numero_processo,
+                    "erro_msg": r.erro_msg,
+                }
+                for r in resultados
+            ]
+            sb.table("upload_batches").insert({
+                "total_arquivos": len(resultados),
+                "criados": sum(1 for r in resultados if r.status == "criado"),
+                "ja_existentes": sum(1 for r in resultados if r.status == "ja_existe"),
+                "com_advogado": sum(1 for r in resultados if r.status == "tem_advogado"),
+                "erros": sum(1 for r in resultados if r.status == "erro"),
+                "arquivos": arquivos_json,
+                "responsavel": responsavel,
+            }).execute()
+        except Exception as e:
+            logger.warning(f"Falha ao salvar histórico do batch: {e}")
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @router.get("/uploads")

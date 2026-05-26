@@ -1,17 +1,51 @@
 import client from "./client";
-import type { DocumentoProcessado, LoteRequest, LoteResult, UploadBatch, UploadHistoricoResponse } from "../types/documento";
+import type { DocumentoProcessado, LoteRequest, LoteResult, UploadHistoricoResponse } from "../types/documento";
 
-export async function uploadDocumentos(files: File[], responsavel: string): Promise<DocumentoProcessado[]> {
+const API_BASE = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : "/api";
+
+export async function uploadDocumentosStreaming(
+  files: File[],
+  responsavel: string,
+  onResult: (doc: DocumentoProcessado) => void
+): Promise<void> {
   const form = new FormData();
   for (const file of files) {
     form.append("files", file);
   }
   form.append("responsavel", responsavel);
-  const { data } = await client.post<DocumentoProcessado[]>("/documentos/upload", form, {
-    headers: { "Content-Type": "multipart/form-data" },
-    timeout: 600_000,
+
+  const response = await fetch(`${API_BASE}/documentos/upload`, {
+    method: "POST",
+    body: form,
   });
-  return data;
+
+  if (!response.ok) {
+    throw new Error(`Erro ao enviar documentos (${response.status})`);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const payload = line.slice(6).trim();
+      if (payload === "[DONE]") return;
+      try {
+        onResult(JSON.parse(payload) as DocumentoProcessado);
+      } catch {
+        // ignora linhas malformadas
+      }
+    }
+  }
 }
 
 export async function enviarLote(payload: LoteRequest): Promise<LoteResult> {

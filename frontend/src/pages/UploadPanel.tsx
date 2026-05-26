@@ -200,7 +200,7 @@ export function UploadPanel() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [responsavel, setResponsavel] = useState<string>("");
   const [semResponsavelAviso, setSemResponsavelAviso] = useState(false);
-  const [pendingCount, setPendingCount] = useState(0);
+  const [totalFiles, setTotalFiles] = useState(0);
 
   const upload = useUploadDocumentos();
   const enviarLote = useEnviarLote();
@@ -213,17 +213,17 @@ export function UploadPanel() {
     setSemResponsavelAviso(false);
     setResultados([]);
     setSelectedIds(new Set());
-    setPendingCount(files.length);
-    const data = await upload.mutateAsync({ files, responsavel });
-    setPendingCount(0);
-    setResultados(data);
-    // Pré-selecionar todos os leads criados com telefone
-    const ids = new Set(
-      data
-        .filter((d) => d.status === "criado" && d.lead_id && d.telefone)
-        .map((d) => d.lead_id!)
-    );
-    setSelectedIds(ids);
+    setTotalFiles(files.length);
+    await upload.mutateAsync({
+      files,
+      responsavel,
+      onResult: (doc) => {
+        setResultados((prev) => [...prev, doc]);
+        if (doc.status === "criado" && doc.lead_id && doc.telefone) {
+          setSelectedIds((prev) => new Set([...prev, doc.lead_id!]));
+        }
+      },
+    });
   };
 
   const toggleSelect = (id: string) => {
@@ -308,16 +308,10 @@ export function UploadPanel() {
 
         {/* Loading state */}
         {upload.isPending && (
-          <div className="flex flex-col gap-1.5 bg-surface-800/60 border border-white/5 rounded-xl px-6 py-4">
-            <div className="flex items-center gap-3">
-              <Loader2 size={20} className="animate-spin text-indigo-400 shrink-0" />
-              <span className="text-sm text-slate-300">
-                Processando {pendingCount} arquivo{pendingCount !== 1 ? "s" : ""}...
-              </span>
-            </div>
-            <span className="text-xs text-slate-500 ml-8">
-              Estimativa: ~{Math.ceil(pendingCount / 8)} min
-              {pendingCount > 8 && " · processando 8 por vez"}
+          <div className="flex items-center gap-3 bg-surface-800/60 border border-white/5 rounded-xl px-6 py-4">
+            <Loader2 size={20} className="animate-spin text-indigo-400 shrink-0" />
+            <span className="text-sm text-slate-300">
+              Processando... {resultados.length} de {totalFiles}
             </span>
           </div>
         )}
@@ -337,7 +331,7 @@ export function UploadPanel() {
               </div>
               <button
                 onClick={handleEnviarLote}
-                disabled={selectedIds.size === 0 || enviarLote.isPending}
+                disabled={selectedIds.size === 0 || enviarLote.isPending || upload.isPending}
                 className={cn(
                   "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
                   selectedIds.size > 0 && !enviarLote.isPending
