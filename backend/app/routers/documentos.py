@@ -26,13 +26,18 @@ async def upload_documentos(
     if not files:
         raise HTTPException(status_code=422, detail="Nenhum arquivo enviado.")
 
+    # Lê todos os bytes ANTES de criar o StreamingResponse.
+    # UploadFile fecha o arquivo quando o generator começa a executar.
+    file_data: list[tuple[str, bytes]] = []
+    for upload in files:
+        filename = upload.filename or "documento.pdf"
+        pdf_bytes = await upload.read()
+        file_data.append((filename, pdf_bytes))
+
     async def generate() -> AsyncIterator[str]:
         resultados: list[DocumentoProcessado] = []
 
-        for upload in files:
-            filename = upload.filename or "documento.pdf"
-            pdf_bytes = await upload.read()
-
+        for filename, pdf_bytes in file_data:
             if len(pdf_bytes) == 0:
                 doc = DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo vazio.")
             elif len(pdf_bytes) > MAX_FILE_SIZE:
