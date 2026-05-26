@@ -12,7 +12,11 @@ export async function uploadDocumentosStreaming(
 ): Promise<void> {
   const form = new FormData();
   for (const file of files) {
-    form.append("files", file);
+    const safeName = file.name
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^\w.\- ]/g, "_");
+    form.append("files", file, safeName);
   }
   form.append("responsavel", responsavel);
 
