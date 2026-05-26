@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { uploadDocumentosStreaming, enviarLote, fetchUploadHistorico } from "../api/documentos";
 import type { DocumentoProcessado, LoteRequest } from "../types/documento";
 
+const BATCH_SIZE = 5;
+
 export function useUploadDocumentos() {
   const queryClient = useQueryClient();
   const [isPending, setIsPending] = useState(false);
@@ -20,7 +22,10 @@ export function useUploadDocumentos() {
     setIsPending(true);
     setIsError(false);
     try {
-      await uploadDocumentosStreaming(files, responsavel, onResult);
+      for (let i = 0; i < files.length; i += BATCH_SIZE) {
+        const batch = files.slice(i, i + BATCH_SIZE);
+        await uploadDocumentosStreaming(batch, responsavel, onResult);
+      }
       queryClient.invalidateQueries({ queryKey: ["leads"] });
       queryClient.invalidateQueries({ queryKey: ["metrics"] });
       queryClient.invalidateQueries({ queryKey: ["upload-historico"] });
