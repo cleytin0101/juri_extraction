@@ -70,7 +70,7 @@ async def process_document(pdf_bytes: bytes, filename: str) -> dict:
     except Exception as e:
         logger.warning(f"Enriquecimento falhou para {result['empresa_cnpj']}: {e}")
 
-    if enrichment.get("nome") and not result["empresa_nome"]:
+    if enrichment.get("nome"):
         result["empresa_nome"] = enrichment["nome"]
 
     telefones: list = enrichment.get("telefones") or []

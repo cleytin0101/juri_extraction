@@ -45,7 +45,10 @@ def _cnpj_valido(digits: str) -> bool:
 
 
 _PALAVRAS_FRASE = re.compile(
-    r"\b(que|foi|pelo|pela|para|como|este|essa|com\s|nos\s|das\s|dos\s|numa|uma\s|sendo|sendo\s|admitido|caracteriza)\b",
+    r"\b(que|foi|pelo|pela|para|como|este|essa|com\s|nos\s|das\s|dos\s|numa|uma\s"
+    r"|sendo|admitido|caracteriza"
+    r"|estava|esteve|havia|sobre\s|entre\s"
+    r"|ausência|ausencia|respaldo|subordinad|contratad|admitid|prestou|exerc|trabalhava|atuava)\b",
     re.IGNORECASE,
 )
 
@@ -55,9 +58,23 @@ _SUFIXO_EMPRESA = re.compile(
 )
 
 
+_INICIO_FRASE = re.compile(
+    r"^(e\s|ou\s|de\s|da\s|do\s|a\s|o\s|ao\s|à\s|em\s|por\s|com\s|sem\s"
+    r"|foi\s|era\s|está\s|estava\s|é\s|um\s|uma\s|que\s|se\s)",
+    re.IGNORECASE,
+)
+
+
 def _nome_parece_empresa(nome: str) -> bool:
     if not nome or len(nome.strip()) < 4:
         return False
+    # Rejeita se começa com conjunção, preposição, artigo ou verbo conjugado
+    if _INICIO_FRASE.match(nome):
+        return False
+    # Rejeita frases longas demais (nomes de empresa raramente têm mais de 7 palavras)
+    if len(nome.split()) > 7:
+        return False
+    # Rejeita se tem 2+ palavras típicas de frases jurídicas
     if len(_PALAVRAS_FRASE.findall(nome)) >= 2:
         return False
     return True
@@ -227,7 +244,10 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
         re.IGNORECASE,
     )
     if m:
-        result["reclamante_nome"] = m.group(1).strip()
+        candidato = m.group(1).strip()
+        # Rejeita fragmentos de frase — reclamante deve ser um nome próprio
+        if not _INICIO_FRASE.match(candidato) and len(_PALAVRAS_FRASE.findall(candidato)) < 2:
+            result["reclamante_nome"] = candidato
 
     # RECLAMADO / empresa — padrão principal + fallback com validação
     m = re.search(
