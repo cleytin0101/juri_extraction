@@ -43,6 +43,6 @@ app.include_router(debug.router)
 app.include_router(whatsapp.router)
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok"}
