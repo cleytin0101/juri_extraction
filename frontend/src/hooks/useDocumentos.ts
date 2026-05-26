@@ -1,5 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { uploadDocumentos, enviarLote } from "../api/documentos";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { uploadDocumentos, enviarLote, fetchUploadHistorico } from "../api/documentos";
 import type { LoteRequest } from "../types/documento";
 
 export function useUploadDocumentos() {
@@ -9,7 +9,16 @@ export function useUploadDocumentos() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["leads"] });
       queryClient.invalidateQueries({ queryKey: ["metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["upload-historico"] });
     },
+  });
+}
+
+export function useUploadHistorico(page = 1) {
+  return useQuery({
+    queryKey: ["upload-historico", page],
+    queryFn: () => fetchUploadHistorico(page),
+    staleTime: 30_000,
   });
 }
 

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchLeads, updateLeadStatus, sendMensagem, deleteLead } from "../api/leads";
+import { fetchLeads, fetchVaras, updateLeadStatus, sendMensagem, deleteLead } from "../api/leads";
 import { enviarLote } from "../api/documentos";
 import type { LeadStatus } from "../types/lead";
 
@@ -11,12 +11,21 @@ export function useLeads(
   valor_max?: number,
   data_audiencia_de?: string,
   data_audiencia_ate?: string,
+  orgao_julgador?: string,
 ) {
   return useQuery({
-    queryKey: ["leads", status, page, page_size, valor_min, valor_max, data_audiencia_de, data_audiencia_ate],
-    queryFn: () => fetchLeads({ status, page, page_size, valor_min, valor_max, data_audiencia_de, data_audiencia_ate }),
+    queryKey: ["leads", status, page, page_size, valor_min, valor_max, data_audiencia_de, data_audiencia_ate, orgao_julgador],
+    queryFn: () => fetchLeads({ status, page, page_size, valor_min, valor_max, data_audiencia_de, data_audiencia_ate, orgao_julgador }),
     placeholderData: (prev) => prev,
     staleTime: 30_000,
+  });
+}
+
+export function useVaras() {
+  return useQuery({
+    queryKey: ["varas"],
+    queryFn: fetchVaras,
+    staleTime: 5 * 60_000,
   });
 }
 

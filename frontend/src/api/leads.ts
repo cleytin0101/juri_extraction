@@ -9,8 +9,14 @@ export async function fetchLeads(params: {
   valor_max?: number;
   data_audiencia_de?: string;
   data_audiencia_ate?: string;
+  orgao_julgador?: string;
 }): Promise<LeadListResponse> {
   const { data } = await client.get<LeadListResponse>("/leads", { params });
+  return data;
+}
+
+export async function fetchVaras(): Promise<string[]> {
+  const { data } = await client.get<string[]>("/leads/varas");
   return data;
 }
 

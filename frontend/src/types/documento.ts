@@ -27,3 +27,30 @@ export interface LoteResult {
   erros: number;
   detalhes_erros: { lead_id: string; erro: string }[];
 }
+
+export interface UploadBatchArquivo {
+  filename: string;
+  status: DocumentoStatus;
+  lead_id: string | null;
+  empresa_nome: string | null;
+  numero_processo: string | null;
+  erro_msg: string | null;
+}
+
+export interface UploadBatch {
+  id: string;
+  created_at: string;
+  total_arquivos: number;
+  criados: number;
+  ja_existentes: number;
+  com_advogado: number;
+  erros: number;
+  arquivos: UploadBatchArquivo[];
+}
+
+export interface UploadHistoricoResponse {
+  items: UploadBatch[];
+  total: number;
+  page: number;
+  page_size: number;
+}

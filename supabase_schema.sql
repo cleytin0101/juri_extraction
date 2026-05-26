@@ -127,6 +127,23 @@ CREATE TABLE extracoes (
 CREATE INDEX idx_extracoes_created_at ON extracoes(created_at DESC);
 CREATE INDEX idx_extracoes_data_pauta ON extracoes(data_pauta);
 
+-- Histórico de uploads manuais de PDFs
+CREATE TABLE upload_batches (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at      TIMESTAMPTZ DEFAULT now(),
+  total_arquivos  INT DEFAULT 0,
+  criados         INT DEFAULT 0,
+  ja_existentes   INT DEFAULT 0,
+  com_advogado    INT DEFAULT 0,
+  erros           INT DEFAULT 0,
+  arquivos        JSONB DEFAULT '[]'
+);
+
+CREATE INDEX idx_upload_batches_created_at ON upload_batches(created_at DESC);
+
+-- Índice para filtro por vara/órgão julgador
+CREATE INDEX IF NOT EXISTS idx_processos_orgao_julgador ON processos(orgao_julgador);
+
 -- View desnormalizada para o dashboard
 CREATE VIEW leads_completo AS
 SELECT

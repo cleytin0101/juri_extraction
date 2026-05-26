@@ -2,9 +2,10 @@ import { useRef, useState, useCallback } from "react";
 import {
   Upload, FileText, CheckCircle2, XCircle, AlertTriangle,
   Send, Loader2, Phone, Building2, Hash, DollarSign, User,
+  History, ChevronDown, ChevronRight,
 } from "lucide-react";
-import { useUploadDocumentos, useEnviarLote } from "../hooks/useDocumentos";
-import type { DocumentoProcessado } from "../types/documento";
+import { useUploadDocumentos, useEnviarLote, useUploadHistorico } from "../hooks/useDocumentos";
+import type { DocumentoProcessado, UploadBatch } from "../types/documento";
 import { cn } from "@/lib/utils";
 
 function fmtBRL(v: number | null) {
@@ -86,7 +87,101 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
   );
 }
 
+function fmtDateTime(iso: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+function BatchItem({ batch }: { batch: UploadBatch }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="border border-white/5 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded((o) => !o)}
+        className="w-full flex items-center justify-between px-5 py-3 hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center gap-4 text-sm">
+          {expanded ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
+          <span className="text-slate-400 font-mono text-xs">{fmtDateTime(batch.created_at)}</span>
+          <span className="text-white font-medium">{batch.total_arquivos} arquivo{batch.total_arquivos !== 1 ? "s" : ""}</span>
+          <span className="text-accent-green text-xs">{batch.criados} criados</span>
+          {batch.ja_existentes > 0 && <span className="text-yellow-400 text-xs">{batch.ja_existentes} já existiam</span>}
+          {batch.com_advogado > 0 && <span className="text-slate-500 text-xs">{batch.com_advogado} com advogado</span>}
+          {batch.erros > 0 && <span className="text-accent-red text-xs">{batch.erros} erros</span>}
+        </div>
+      </button>
+      {expanded && (
+        <div className="border-t border-white/5 divide-y divide-white/5">
+          {batch.arquivos.map((arq, i) => (
+            <div key={i} className="flex items-center gap-3 px-5 py-2 text-xs">
+              <FileText size={12} className="text-slate-600 shrink-0" />
+              <span className="text-slate-400 truncate flex-1" title={arq.filename}>{arq.filename}</span>
+              {arq.empresa_nome && <span className="text-slate-300 truncate max-w-[180px]">{arq.empresa_nome}</span>}
+              {arq.numero_processo && <span className="text-slate-600 font-mono hidden lg:block">{arq.numero_processo}</span>}
+              <span className={cn(
+                "px-2 py-0.5 rounded-full border font-medium shrink-0",
+                arq.status === "criado" ? "bg-accent-green/10 text-accent-green border-accent-green/20" :
+                arq.status === "ja_existe" ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" :
+                arq.status === "tem_advogado" ? "bg-slate-500/10 text-slate-400 border-slate-500/20" :
+                "bg-accent-red/10 text-accent-red border-accent-red/20"
+              )}>
+                {arq.status === "criado" ? "Criado" : arq.status === "ja_existe" ? "Já existia" : arq.status === "tem_advogado" ? "Com advogado" : "Erro"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoricoPanel() {
+  const [page, setPage] = useState(1);
+  const { data, isLoading } = useUploadHistorico(page);
+  const total = data?.total ?? 0;
+  const pageSize = data?.page_size ?? 20;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-3 py-12 justify-center text-slate-500">
+        <Loader2 size={18} className="animate-spin" />
+        <span className="text-sm">Carregando histórico...</span>
+      </div>
+    );
+  }
+
+  if (!data?.items?.length) {
+    return (
+      <div className="text-center py-12 text-slate-600">
+        <History size={48} className="mx-auto mb-4 opacity-30" />
+        <p className="text-sm">Nenhum upload registrado ainda.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {data.items.map((batch) => (
+        <BatchItem key={batch.id} batch={batch} />
+      ))}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2 text-xs text-slate-500">
+          <span>{total} batches · página {page} de {totalPages}</span>
+          <div className="flex gap-2">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} className="px-2 py-1 rounded bg-surface-700 disabled:opacity-30">Anterior</button>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="px-2 py-1 rounded bg-surface-700 disabled:opacity-30">Próxima</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function UploadPanel() {
+  const [aba, setAba] = useState<"upload" | "historico">("upload");
   const [resultados, setResultados] = useState<DocumentoProcessado[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -128,14 +223,35 @@ export function UploadPanel() {
     <div className="min-h-screen bg-[#020617] text-white">
       <div className="max-w-6xl mx-auto p-6 lg:p-10 space-y-8">
         {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Upload de Documentos</h1>
-          <p className="text-slate-400 mt-2 text-sm">
-            Faça upload dos PDFs dos processos. O sistema extrai empresa, CNPJ, valor da causa
-            e busca o telefone automaticamente via CNPJ.ws.
-          </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Upload de Documentos</h1>
+            <p className="text-slate-400 mt-2 text-sm">
+              Faça upload dos PDFs dos processos. O sistema extrai empresa, CNPJ, valor da causa
+              e busca o telefone automaticamente via CNPJ.ws.
+            </p>
+          </div>
+          <div className="flex gap-1 bg-surface-800 rounded-lg p-1 border border-white/5 shrink-0 mt-1">
+            <button
+              onClick={() => setAba("upload")}
+              className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors", aba === "upload" ? "bg-surface-700 text-white" : "text-slate-400 hover:text-white")}
+            >
+              <Upload size={14} /> Upload
+            </button>
+            <button
+              onClick={() => setAba("historico")}
+              className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors", aba === "historico" ? "bg-surface-700 text-white" : "text-slate-400 hover:text-white")}
+            >
+              <History size={14} /> Histórico
+            </button>
+          </div>
         </div>
 
+        {/* Aba Histórico */}
+        {aba === "historico" && <HistoricoPanel />}
+
+        {/* Aba Upload */}
+        {aba === "upload" && <>
         {/* Drop zone */}
         <DropZone onFiles={handleFiles} />
 
@@ -355,6 +471,7 @@ export function UploadPanel() {
             </span>
           </div>
         )}
+        </>}
       </div>
     </div>
   );

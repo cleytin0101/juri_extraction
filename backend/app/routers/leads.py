@@ -7,6 +7,11 @@ from ..database import get_supabase
 router = APIRouter(prefix="/api/leads", tags=["leads"])
 
 
+@router.get("/varas")
+def list_varas():
+    return lead_service.get_varas_disponiveis()
+
+
 @router.get("", response_model=LeadListResponse)
 def list_leads(
     status: Optional[str] = Query(None),
@@ -16,6 +21,7 @@ def list_leads(
     valor_max: Optional[float] = Query(None),
     data_audiencia_de: Optional[str] = Query(None),
     data_audiencia_ate: Optional[str] = Query(None),
+    orgao_julgador: Optional[str] = Query(None),
 ):
     data = lead_service.get_leads(
         status=status,
@@ -25,6 +31,7 @@ def list_leads(
         valor_max=valor_max,
         data_audiencia_de=data_audiencia_de,
         data_audiencia_ate=data_audiencia_ate,
+        orgao_julgador=orgao_julgador,
     )
     return LeadListResponse(**data)
 

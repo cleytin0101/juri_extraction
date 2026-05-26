@@ -1,12 +1,22 @@
 import { FilterTabs } from "./FilterTabs";
+import { LeadFilters } from "./LeadFilters";
 import { LeadRow } from "./LeadRow";
 import { useLeads } from "../../hooks/useLeads";
 import { useFilterStore } from "../../store/filterStore";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export function LeadTable() {
-  const { activeStatus, page, setStatus, setPage } = useFilterStore();
-  const { data, isLoading } = useLeads(activeStatus, page);
+  const {
+    activeStatus, page, orgaoJulgador, valorMin, valorMax,
+    dataAudienciaDe, dataAudienciaAte,
+    setStatus, setPage,
+  } = useFilterStore();
+  const { data, isLoading } = useLeads(
+    activeStatus, page, 20,
+    valorMin, valorMax,
+    dataAudienciaDe, dataAudienciaAte,
+    orgaoJulgador,
+  );
 
   const total = data?.total ?? 0;
   const pageSize = data?.page_size ?? 20;
@@ -14,9 +24,17 @@ export function LeadTable() {
 
   return (
     <div className="bg-surface-800 rounded-xl border border-surface-600">
-      <div className="flex items-center justify-between p-4 border-b border-surface-600">
-        <h3 className="text-white font-semibold">Leads Recentes</h3>
-        <FilterTabs active={activeStatus} onChange={setStatus} />
+      <div className="flex flex-col gap-3 p-4 border-b border-surface-600">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-white font-semibold">Leads Recentes</h3>
+            {!isLoading && (
+              <p className="text-xs text-slate-500 mt-0.5">{total} lead{total !== 1 ? "s" : ""} encontrado{total !== 1 ? "s" : ""}</p>
+            )}
+          </div>
+          <FilterTabs active={activeStatus} onChange={setStatus} />
+        </div>
+        <LeadFilters />
       </div>
 
       <div className="overflow-x-auto">

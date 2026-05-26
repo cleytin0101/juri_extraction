@@ -1,5 +1,5 @@
 import client from "./client";
-import type { DocumentoProcessado, LoteRequest, LoteResult } from "../types/documento";
+import type { DocumentoProcessado, LoteRequest, LoteResult, UploadBatch, UploadHistoricoResponse } from "../types/documento";
 
 export async function uploadDocumentos(files: File[]): Promise<DocumentoProcessado[]> {
   const form = new FormData();
@@ -15,5 +15,10 @@ export async function uploadDocumentos(files: File[]): Promise<DocumentoProcessa
 
 export async function enviarLote(payload: LoteRequest): Promise<LoteResult> {
   const { data } = await client.post<LoteResult>("/leads/mensagem/lote", payload);
+  return data;
+}
+
+export async function fetchUploadHistorico(page = 1): Promise<UploadHistoricoResponse> {
+  const { data } = await client.get<UploadHistoricoResponse>("/documentos/uploads", { params: { page, page_size: 20 } });
   return data;
 }

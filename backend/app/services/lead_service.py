@@ -16,6 +16,7 @@ def get_leads(
     valor_max: Optional[float] = None,
     data_audiencia_de: Optional[str] = None,
     data_audiencia_ate: Optional[str] = None,
+    orgao_julgador: Optional[str] = None,
 ) -> dict:
     sb = get_supabase()
     query = sb.table("leads_completo").select("*")
@@ -32,6 +33,8 @@ def get_leads(
             q = q.gte("data_audiencia", data_audiencia_de)
         if data_audiencia_ate:
             q = q.lte("data_audiencia", data_audiencia_ate + "T23:59:59")
+        if orgao_julgador:
+            q = q.ilike("orgao_julgador", f"%{orgao_julgador}%")
         return q
 
     query = _apply_filters(query)
@@ -54,6 +57,24 @@ def get_leads(
         "page": page,
         "page_size": page_size,
     }
+
+
+def get_varas_disponiveis() -> List[str]:
+    sb = get_supabase()
+    result = (
+        sb.table("leads_completo")
+        .select("orgao_julgador")
+        .not_.is_("orgao_julgador", "null")
+        .execute()
+    )
+    seen = set()
+    varas = []
+    for row in (result.data or []):
+        v = (row.get("orgao_julgador") or "").strip()
+        if v and v not in seen:
+            seen.add(v)
+            varas.append(v)
+    return sorted(varas)
 
 
 def update_lead_status(lead_id: str, status: str) -> Optional[dict]:

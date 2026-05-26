@@ -110,6 +110,24 @@ DATA_AUDIENCIA_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+# Verbos explícitos de designação/intimação de audiência futura (mais confiável que o regex genérico)
+DESIGNACAO_AUDIENCIA_REGEX = re.compile(
+    r"(?:"
+    r"DESIGNA(?:NDO|R|DA|DO|M)?\s+(?:a\s+)?AUDI[ÊE]NCIA\s+(?:para\s+)?(?:o\s+dia\s+)?"
+    r"|FICA(?:M)?\s+(?:as\s+partes\s+)?(?:INTIMA(?:DA|DO|S|DAS|DOS)?|NOTIFICA(?:DA|DO|S|DAS|DOS)?)\s+[^.\n]{0,60}?"
+    r"|INTIMAR\s+as\s+partes[^.\n]{0,80}?"
+    r"|audi[êe]ncia\s+designada\s+para\s+(?:o\s+dia\s+)?"
+    r")"
+    r"(\d{2}/\d{2}/\d{4}(?:\s+\d{2}:\d{2})?)",
+    re.IGNORECASE,
+)
+
+# Palavras que indicam data de registro/autuação — não são datas de audiência
+_NEGACAO_DATA_REGEX = re.compile(
+    r"(?:autua[çc][aã]o|registro|protocolo|distribui[çc][aã]o|ajuizamento|propositura)\s*[:\-]?\s*\Z",
+    re.IGNORECASE,
+)
+
 NOTIFICACAO_POSTAL_REGEX = re.compile(
     r"NOTIFICA[CÇ][ÃA]O\s+POSTAL"
     r"|CARTA\s+DE\s+INTIMA[CÇ][ÃA]O"
@@ -148,7 +166,7 @@ def _extract_audiencia_from_notificacao(pages_text: list) -> dict:
 
 
 def check_tem_advogado_reclamado(text: str) -> bool:
-    """Retorna True apenas se o RECLAMADO possui advogado — ignora advogados do RECLAMANTE."""
+    """Retorna True apenas se o RECLAMADO possui advogado constituído — ignora advogados do RECLAMANTE."""
     reclamado_m = re.search(r"RECLAMAD[AO][:\s]", text, re.IGNORECASE)
     if not reclamado_m:
         return False
@@ -162,7 +180,18 @@ def check_tem_advogado_reclamado(text: str) -> bool:
         reclamado_section = text[reclamado_start : reclamado_start + end_m.start()]
     else:
         reclamado_section = text[reclamado_start : reclamado_start + 800]
-    return bool(re.search(r"ADVOGAD[AO]", reclamado_section, re.IGNORECASE))
+
+    # Sinal mais confiável: número da OAB na seção do reclamado
+    if re.search(r"OAB\s*/?\s*[A-Z]{2}\s*/?\s*\d+", reclamado_section, re.IGNORECASE):
+        return True
+
+    # Padrão "Advogado(a): Nome" — dois-pontos indica campo preenchido com nome real
+    if re.search(r"ADVOGAD[AO]\s*:\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ]", reclamado_section, re.IGNORECASE):
+        return True
+
+    # Sem OAB e sem "Advogado: Nome" → assume sem advogado constituído
+    # (evita falsos positivos de "sem advogado", "dispensado de advogado", etc.)
+    return False
 
 
 def parse_pdf_text(pdf_bytes: bytes) -> dict:
@@ -276,16 +305,31 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
     if resumo_m:
         result["resumo_caso"] = resumo_m.group(1).strip()[:500]
 
-    # Data de audiência — prioriza notificação postal, cai no geral se não encontrar
+    # Data de audiência — 3 níveis de confiança
+    # Nível 1: notificação postal (mais confiável)
     audiencia_info = _extract_audiencia_from_notificacao(pages_text)
     if audiencia_info:
         result["data_audiencia"] = audiencia_info["data_audiencia"]
         if audiencia_info.get("modalidade"):
             result["modalidade_audiencia"] = audiencia_info["modalidade"]
     else:
-        data_m = DATA_AUDIENCIA_REGEX.search(full_text)
-        if data_m:
-            result["data_audiencia"] = parse_data_audiencia(data_m.group(1))
+        # Nível 2: verbos explícitos de designação/intimação de audiência
+        d2_m = DESIGNACAO_AUDIENCIA_REGEX.search(full_text)
+        if d2_m:
+            result["data_audiencia"] = parse_data_audiencia(d2_m.group(1))
+        else:
+            # Nível 3 (fallback): regex genérico, mas só aceita data futura
+            # e rejeita contexto de autuação/registro
+            now = datetime.now()
+            for data_m in DATA_AUDIENCIA_REGEX.finditer(full_text):
+                ctx_start = max(0, data_m.start() - 60)
+                ctx = full_text[ctx_start:data_m.start()]
+                if _NEGACAO_DATA_REGEX.search(ctx):
+                    continue
+                parsed = parse_data_audiencia(data_m.group(1))
+                if parsed and parsed > now:
+                    result["data_audiencia"] = parsed
+                    break
 
     result["tem_advogado"] = check_tem_advogado_reclamado(full_text)
 
