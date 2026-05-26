@@ -36,11 +36,20 @@ async def process_document(pdf_bytes: bytes, filename: str, responsavel: str | N
         "erro_msg": None,
     }
 
+    # Fase 1: primeiras 6 páginas
     try:
-        parsed = await asyncio.to_thread(parse_pdf_text, pdf_bytes)
+        parsed = await asyncio.to_thread(parse_pdf_text, pdf_bytes, 6)
     except Exception as e:
         result["erro_msg"] = f"Falha ao ler PDF: {e}"
         return result
+
+    # Se os campos-chave não foram encontrados, lê o PDF completo (Fase 2)
+    if not (bool(parsed.get("empresa_nome")) and parsed.get("data_audiencia") is not None):
+        try:
+            parsed_full = await asyncio.to_thread(parse_pdf_text, pdf_bytes)
+            parsed = parsed_full
+        except Exception:
+            pass  # usa o resultado parcial da Fase 1
 
     result.update({
         "empresa_nome": parsed.get("empresa_nome") or None,

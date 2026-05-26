@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List, Optional, AsyncIterator
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
@@ -36,7 +37,9 @@ async def upload_documentos(
 
     async def generate() -> AsyncIterator[str]:
         resultados: list[DocumentoProcessado] = []
+        erros_retry: list[tuple[str, bytes]] = []
 
+        # --- Primeira passagem ---
         for filename, pdf_bytes in file_data:
             if len(pdf_bytes) == 0:
                 doc = DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo vazio.")
@@ -44,13 +47,35 @@ async def upload_documentos(
                 doc = DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo excede o limite de 50 MB.")
             else:
                 try:
-                    resultado = await process_document(pdf_bytes, filename, responsavel=responsavel)
+                    resultado = await asyncio.wait_for(
+                        process_document(pdf_bytes, filename, responsavel=responsavel),
+                        timeout=60,
+                    )
                     doc = DocumentoProcessado(**resultado)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout (60s): {filename}")
+                    doc = DocumentoProcessado(filename=filename, status="erro", erro_msg="Tempo limite excedido (60s).")
                 except Exception as e:
                     logger.exception(f"Erro inesperado ao processar {filename}: {e}")
                     doc = DocumentoProcessado(filename=filename, status="erro", erro_msg=str(e))
 
             resultados.append(doc)
+            if doc.status == "erro":
+                erros_retry.append((filename, pdf_bytes))
+            yield f"data: {doc.model_dump_json()}\n\n"
+
+        # --- Retry automático dos que erraram ---
+        for filename, pdf_bytes in erros_retry:
+            try:
+                resultado = await asyncio.wait_for(
+                    process_document(pdf_bytes, filename, responsavel=responsavel),
+                    timeout=60,
+                )
+                doc = DocumentoProcessado(**resultado)
+            except asyncio.TimeoutError:
+                doc = DocumentoProcessado(filename=filename, status="erro", erro_msg="Tempo limite excedido (60s) — segunda tentativa.")
+            except Exception as e:
+                doc = DocumentoProcessado(filename=filename, status="erro", erro_msg=str(e))
             yield f"data: {doc.model_dump_json()}\n\n"
 
         # Salva o batch no histórico de uploads

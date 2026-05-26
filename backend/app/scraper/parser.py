@@ -211,11 +211,12 @@ def check_tem_advogado_reclamado(text: str) -> bool:
     return False
 
 
-def parse_pdf_text(pdf_bytes: bytes) -> dict:
+def parse_pdf_text(pdf_bytes: bytes, max_pages: int | None = None) -> dict:
     """
     Extrai campos estruturados de um PDF do PJe.
     Retorna: reclamante_nome, empresa_nome, empresa_cnpj, valor_causa,
              resumo_caso, tem_advogado, orgao_julgador, data_audiencia.
+    max_pages=None lê todas as páginas; max_pages=N lê só as N primeiras.
     """
     result: dict = {
         "reclamante_nome": "",
@@ -231,7 +232,8 @@ def parse_pdf_text(pdf_bytes: bytes) -> dict:
     try:
         import pdfplumber
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            pages_text = [p.extract_text() or "" for p in pdf.pages[:15]]
+            pages = pdf.pages[:max_pages] if max_pages else pdf.pages
+            pages_text = [p.extract_text() or "" for p in pages]
             full_text = "\n".join(pages_text)
     except Exception as e:
         logger.warning(f"Erro ao ler PDF: {e}")

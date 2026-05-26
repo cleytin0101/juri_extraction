@@ -218,7 +218,15 @@ export function UploadPanel() {
       files,
       responsavel,
       onResult: (doc) => {
-        setResultados((prev) => [...prev, doc]);
+        setResultados((prev) => {
+          const idx = prev.findIndex(r => r.filename === doc.filename && r.status === "erro");
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = doc;
+            return next;
+          }
+          return [...prev, doc];
+        });
         if (doc.status === "criado" && doc.lead_id && doc.telefone) {
           setSelectedIds((prev) => new Set([...prev, doc.lead_id!]));
         }
