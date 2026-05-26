@@ -9,7 +9,7 @@ export async function uploadDocumentos(files: File[], responsavel: string): Prom
   form.append("responsavel", responsavel);
   const { data } = await client.post<DocumentoProcessado[]>("/documentos/upload", form, {
     headers: { "Content-Type": "multipart/form-data" },
-    timeout: 240_000,
+    timeout: 600_000,
   });
   return data;
 }

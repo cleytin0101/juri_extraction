@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documentos", tags=["documentos"])
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB por arquivo
+MAX_CONCURRENT = 8  # arquivos processados em paralelo (evita rate-limit CNPJ.ws)
 
 
 @router.post("/upload", response_model=List[DocumentoProcessado])
@@ -20,42 +22,29 @@ async def upload_documentos(
 ):
     """
     Recebe um ou mais PDFs de processos judiciais, extrai os dados e cria leads.
-    Processa cada arquivo em sequência e retorna o resultado de cada um.
+    Processa até 8 arquivos em paralelo para suportar lotes de até 30 arquivos.
     """
     if not files:
         raise HTTPException(status_code=422, detail="Nenhum arquivo enviado.")
 
-    resultados = []
-    for upload in files:
-        filename = upload.filename or "documento.pdf"
+    sem = asyncio.Semaphore(MAX_CONCURRENT)
 
+    async def _process_one(upload: UploadFile) -> DocumentoProcessado:
+        filename = upload.filename or "documento.pdf"
         pdf_bytes = await upload.read()
         if len(pdf_bytes) == 0:
-            resultados.append(DocumentoProcessado(
-                filename=filename,
-                status="erro",
-                erro_msg="Arquivo vazio.",
-            ))
-            continue
-
+            return DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo vazio.")
         if len(pdf_bytes) > MAX_FILE_SIZE:
-            resultados.append(DocumentoProcessado(
-                filename=filename,
-                status="erro",
-                erro_msg="Arquivo excede o limite de 50 MB.",
-            ))
-            continue
+            return DocumentoProcessado(filename=filename, status="erro", erro_msg="Arquivo excede o limite de 50 MB.")
+        async with sem:
+            try:
+                resultado = await process_document(pdf_bytes, filename, responsavel=responsavel)
+                return DocumentoProcessado(**resultado)
+            except Exception as e:
+                logger.exception(f"Erro inesperado ao processar {filename}: {e}")
+                return DocumentoProcessado(filename=filename, status="erro", erro_msg=str(e))
 
-        try:
-            resultado = await process_document(pdf_bytes, filename, responsavel=responsavel)
-            resultados.append(DocumentoProcessado(**resultado))
-        except Exception as e:
-            logger.exception(f"Erro inesperado ao processar {filename}: {e}")
-            resultados.append(DocumentoProcessado(
-                filename=filename,
-                status="erro",
-                erro_msg=str(e),
-            ))
+    resultados = list(await asyncio.gather(*[_process_one(upload) for upload in files]))
 
     # Salva o batch no histórico de uploads
     try:
